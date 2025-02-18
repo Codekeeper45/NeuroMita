@@ -1,6 +1,9 @@
 import requests
 import base64
 
+"Позволит в итоге анализировать картинки"
+
+
 # Ваш API-ключ OpenRouter
 API_KEY = "REDACTED_ROTATE_REQUIRED" # халявный, я его вырублю)
 
