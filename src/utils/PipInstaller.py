@@ -12,7 +12,7 @@ PipInstaller 2.0
 
 from __future__ import annotations
 import subprocess, sys, os, queue, threading, time, json
-import tkinter as tk       # импорт остаётся, чтобы старый путь тоже работал
+# import tkinter as tk       # импорт остаётся, чтобы старый путь тоже работал
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name, NormalizedName
 from packaging.version import parse as parse_version
@@ -312,7 +312,7 @@ class PipInstaller:
             if is_tk_window and self.progress_window.winfo_exists():
                 try:
                     self.progress_window.update()
-                except tk.TclError:
+                except Exception:
                     pass
 
             # даём Qt «подышать»

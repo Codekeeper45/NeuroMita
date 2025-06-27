@@ -2,7 +2,7 @@ import os
 import json
 import shutil
 import datetime
-from tkinter import messagebox
+# from tkinter import messagebox
 import logging
 
 # Initialize logger
@@ -25,7 +25,7 @@ def list_prompt_sets(catalogue_path, character_name=None):
             return all_sets
     except Exception as e:
         logger.exception(f"Error listing prompt sets in {catalogue_path}: {e}")
-        messagebox.showerror("Error", f"Error listing prompt sets: {e}")
+        # messagebox.showerror("Error", f"Error listing prompt sets: {e}") #  ВРЕМЕННО УБРАЛ
         return []
 
 def read_info_json(set_path):

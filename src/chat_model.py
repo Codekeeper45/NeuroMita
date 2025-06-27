@@ -12,7 +12,6 @@ import importlib
 from typing import List, Dict, Any, Optional
 import queue
 import os  # Added for os.environ
-from PIL import Image # Добавлено для обработки изображений
 from io import BytesIO # Добавлено для обработки изображений
 
 from Logger import logger
@@ -846,6 +845,7 @@ class ChatModel:
             return None
 
         try:
+            from PIL import Image
             original_size = len(image_bytes)
             img = Image.open(BytesIO(image_bytes))
             # Конвертируем в RGB, если режим не RGB (например, RGBA), чтобы избежать ошибок при сохранении JPEG

@@ -9,6 +9,8 @@ import asyncio
 from .base_model import IVoiceModel
 from typing import Optional, Any
 from Logger import logger
+import importlib.util
+
 
 class FishSpeechModel(IVoiceModel):
     # __init__, _load_module, get_display_name, is_installed, install, uninstall, cleanup_state, initialize
@@ -17,19 +19,35 @@ class FishSpeechModel(IVoiceModel):
         super().__init__(parent, model_id)
         self.fish_speech_module = None
         self.current_fish_speech = None
-        self._load_module()
+        logger.info('Тут из инита вызываюсь 1 раз')
+        self.i = 0
 
     def _load_module(self):
         try:
             from fish_speech_lib.inference import FishSpeech
             self.fish_speech_module = FishSpeech
-        except ImportError:
+        except ImportError as ex:
             self.fish_speech_module = None
+            logger.info(ex)
+
 
     def get_display_name(self) -> str:
         return "Fish Speech / +RVC"
-
     def is_installed(self) -> bool:
+
+        onnxruntime_is_imported = 'onnxruntime' in sys.modules or 'onnxruntime-directml' in sys.modules or 'onnx' in sys.modules or 'onnxruntime-gpu' in sys.modules or 'msvc-runtime' in sys.modules
+        logger.info(
+            f"Проверка статуса onnxruntime: "
+            f"{'УЖЕ ИМПОРТИРОВАН' if onnxruntime_is_imported else 'ЕЩЕ НЕ ИМПОРТИРОВАН'}"
+        )
+        import onnxruntime
+        onnxruntime_is_imported = 'onnxruntime' in sys.modules or 'onnxruntime-directml' in sys.modules or 'onnx' in sys.modules or 'onnxruntime-gpu' in sys.modules or 'msvc-runtime' in sys.modules
+        logger.info(
+            f"Проверка статуса onnxruntime: "
+            f"{'УЖЕ ИМПОРТИРОВАН' if onnxruntime_is_imported else 'ЕЩЕ НЕ ИМПОРТИРОВАН'}"
+        )
+        self.i+= 1
+        logger.info(f'is_installed ФИш спич проверка, ну че за дела: {self.i}')
         self._load_module()
         if self.model_id in ["medium+", "medium+low"]:
             return self.fish_speech_module is not None and self.parent.is_triton_installed()
@@ -65,6 +83,8 @@ class FishSpeechModel(IVoiceModel):
         if self.initialized:
             return True
 
+        self._load_module()
+
         if self.fish_speech_module is None:
             logger.error(f"Модуль fish_speech_lib не установлен, но требуется для модели {self.model_id}")
             return False
@@ -90,8 +110,8 @@ class FishSpeechModel(IVoiceModel):
             init_text = f"Инициализация модели {self.model_id}" if self.parent.voice_language == "ru" else f"{self.model_id} Model Initialization"
             logger.info(f"Выполнение тестового прогона для {self.model_id}...")
             try:
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(self.voiceover(init_text))
+                # Используем asyncio.run() для запуска async функции из sync потока
+                asyncio.run(self.voiceover(init_text))
                 logger.info(f"Тестовый прогон для {self.model_id} успешно завершен.")
             except Exception as e:
                 logger.error(f"Ошибка во время тестового прогона модели {self.model_id}: {e}", exc_info=True)

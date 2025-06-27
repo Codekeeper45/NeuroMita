@@ -1,14 +1,14 @@
 
 import io
 import uuid
-import win32gui
+from win32 import  win32gui
 import guiTemplates
 from AudioHandler import AudioHandler
 from Logger import logger
 from SettingsManager import SettingsManager, CollapsibleSection
 from chat_model import ChatModel
 from server import ChatServer
-from Silero import TelegramBotHandler
+# from Silero import TelegramBotHandler # ВРЕМЕННО УБРАЛ
 
 from pyqt_styles.styles import get_stylesheet
 import gettext
@@ -20,7 +20,7 @@ import glob
 import sounddevice as sd
 from ui.settings.voiceover_settings import LOCAL_VOICE_MODELS
 from utils.ffmpeg_installer import install_ffmpeg
-from utils.ModelsDownloader import ModelsDownloader
+# from utils.ModelsDownloader import ModelsDownloader # ВРЕМЕННО УБРАЛ
 
 import asyncio
 import threading
@@ -53,7 +53,7 @@ from ui.settings import (
     g4f_settings, gamemaster_settings, general_model_settings,
     language_settings, microphone_settings, screen_analysis_settings,
     token_settings, voiceover_settings, command_replacer_settings, history_compressor,
-    prompt_catalogue_settings
+    # prompt_catalogue_settings #  ВРЕМЕННО УБРАЛ
 )
 
 
@@ -593,7 +593,7 @@ class ChatGUI(QMainWindow):
         voiceover_settings.setup_voiceover_controls(self, settings_layout)
         microphone_settings.setup_microphone_controls(self, settings_layout)
         character_settings.setup_mita_controls(self, settings_layout)
-        prompt_catalogue_settings.setup_prompt_catalogue_controls(self, settings_layout)
+        #prompt_catalogue_settings.setup_prompt_catalogue_controls(self, settings_layout) # ВРЕМЕННО УБРАЛ
         self.setup_debug_controls(settings_layout)
         self.setup_common_controls(settings_layout)
         gamemaster_settings.setup_game_master_controls(self, settings_layout)

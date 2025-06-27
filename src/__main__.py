@@ -1,14 +1,11 @@
 ### main.py
 
-from PyQt6.QtWidgets import QApplication
 import pydantic.fields
 import uvicorn
-from gui import ChatGUI
 import os
 import sys
 import re
 from Logger import logger
-import tkinter as tk # Пример импорта для вашего GUI
 
 from dotenv import load_dotenv
 ENV_FILENAME = "features.env" 
@@ -25,7 +22,7 @@ import pickletools
 import logging.config
 import fileinput
 import pywintypes
-import win32file
+from win32 import win32file
 import pyworld
 import cProfile
 import filecmp
@@ -40,13 +37,12 @@ except Exception as e:
     logger.warning(f"{e}")
 import xml.dom
 
-if os.environ.get("ENABLE_COMMAND_REPLACER_BY_DEFAULT", "0") != "1":
+if os.environ.get("ENABLE_COMMAND_REPLACER_BY_DEFAULT", "0") != "0":
     import transformers.models.auto.modeling_auto
 import modulefinder
 import sunau
 import xml.etree
 import xml.etree.ElementTree
-#import onnxruntime
 import os
 
 # os.environ["TEST_AS_AMD"] = "TRUE"
@@ -59,10 +55,22 @@ libs_dir = os.path.join(os.path.dirname(sys.executable), "Lib")
 if not os.path.exists(libs_dir):
     os.makedirs(libs_dir)
 
+
+
 logger.info(libs_dir)
 sys.path.insert(0, libs_dir)
+import importlib.util, ctypes, pathlib, os
+
+# ort_spec = importlib.util.find_spec("onnxruntime")
+# capi_dir = pathlib.Path(ort_spec.origin).parent / "capi"
+# ctypes.WinDLL(str(capi_dir / "libiomp5md.dll"))
+
+import onnxruntime
+
+from PyQt6.QtWidgets import QApplication
 
 
+from gui import ChatGUI
 config_path = os.path.join(libs_dir, "fairseq", "dataclass", "configs.py")
 if os.path.exists(config_path):
     

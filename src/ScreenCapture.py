@@ -4,8 +4,8 @@ import numpy as np
 import time
 import threading
 from Logger import logger
-import win32gui
-import win32con
+from win32 import win32gui
+# import win32con
 
 class ScreenCapture:
     def __init__(self):

@@ -15,7 +15,6 @@ class F5TTSModel(IVoiceModel):
         super().__init__(parent, model_id)
         self.f5_pipeline_module = None
         self.current_f5_pipeline = None
-        self._load_module()
 
     def _load_module(self):
         try:
