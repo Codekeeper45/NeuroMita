@@ -66,10 +66,10 @@ emoji
 nodriver
 platformdirs
 dotenv
-onnxruntime
 # atm4x reqs
 
 pyworld==0.3.5
+onnxruntime
 numpy==1.26.0
 httpx==0.27.0
 # transformers
@@ -79,5 +79,5 @@ uvicorn
 google-cloud-storage
 python-chess
 google-api-core
-qtawesome 
+qtawesome
 pyqt6
