@@ -4,20 +4,21 @@ import re
 import time
 from pathlib import Path
 import os
-
+from PyQt6.QtCore import QSize
 from styles.main_styles import get_stylesheet
 from utils import _, process_text_to_voice
 from main_logger import logger
 import ui.gui_templates as gui_templates
 from managers.settings_manager import CollapsibleSection
 from ui.settings.voiceover_settings import LOCAL_VOICE_MODELS
+import types
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPoint, QPropertyAnimation, QBuffer, QIODevice, QEvent 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QPushButton, QLabel, QScrollArea, QFrame, QSplitter,
-    QMessageBox, QDialog, QProgressBar,
-    QTextBrowser, QLineEdit, QFileDialog, QGraphicsOpacityEffect
+    QMessageBox, QDialog, QProgressBar, QStackedWidget,
+    QTextBrowser, QLineEdit, QFileDialog, QGraphicsOpacityEffect, QSizePolicy  
 )
 from PyQt6.QtGui import QTextCursor, QTextCharFormat, QColor, QFont, QImage, QIcon, QPalette, QKeyEvent, QPixmap
 import qtawesome as qta
@@ -39,7 +40,92 @@ from ui.widgets.mita_status_widget import MitaStatusWidget
 from controllers.voice_model_controller import VoiceModelController
 
 from core.events import get_event_bus, Events, Event
+from PyQt6.QtCore import (Qt, QTimer, pyqtSignal, QPoint, QPropertyAnimation, QEasingCurve, QBuffer, QIODevice, QEvent)
 
+
+class SettingsOverlay(QWidget):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setObjectName("SettingsOverlay")
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("""
+            QWidget#SettingsOverlay {
+                background-color: #1a1a1a;
+                border-left: 4px solid #0f0f0f;
+            }
+            QWidget#SettingsOverlay QStackedWidget,
+            QWidget#SettingsOverlay QStackedWidget > QWidget,
+            QWidget#SettingsOverlay QScrollArea,
+            QWidget#SettingsOverlay QScrollArea > QWidget > QWidget {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(10, 10, 10, 10)
+
+        self.stack = QStackedWidget()
+        lay.addWidget(self.stack)
+
+    def add_container(self, container):
+        self.stack.addWidget(container)
+
+    def show_category(self, container):
+        self.stack.setCurrentWidget(container)
+        self.show()
+        
+        if isinstance(container, QScrollArea):
+            container.verticalScrollBar().setValue(0)
+
+class SettingsIconButton(QPushButton):
+    def __init__(self, icon_name, tooltip_text, parent=None):
+        super().__init__(parent)
+        self.setIcon(qta.icon(icon_name, color='#dcdcdc'))
+        from PyQt6.QtCore import QSize
+        icon_size = QApplication.style().pixelMetric(QApplication.style().PixelMetric.PM_SmallIconSize)
+        self.setIconSize(QSize(icon_size, icon_size))
+        self.setToolTip(tooltip_text)
+        self.setFixedSize(40, 40)
+        self.is_active = False
+        self.update_style()
+        
+    def set_active(self, active):
+        self.is_active = active
+        self.update_style()
+        
+    def update_style(self):
+        if self.is_active:
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #8a2be2;
+                    border: none;
+                    padding: 8px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: #9932cc;
+                }
+                QPushButton:pressed {
+                    background-color: #7b1fa2;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                    padding: 8px;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background-color: rgba(138, 43, 226, 0.3);
+                }
+                QPushButton:pressed {
+                    background-color: rgba(138, 43, 226, 0.5);
+                }
+            """)
 
 class ChatGUI(QMainWindow):
     update_chat_signal = pyqtSignal(str, str, bool, str)
@@ -55,17 +141,17 @@ class ChatGUI(QMainWindow):
     hide_status_signal = pyqtSignal()
     pulse_error_signal = pyqtSignal()
 
-    history_loaded_signal = pyqtSignal(dict)          # data: {'messages': [...], ...}
-    more_history_loaded_signal = pyqtSignal(dict)     # data: {'messages': [...], ...}
-    model_initialized_signal = pyqtSignal(dict)       # data: {'model_id': str}
-    model_init_cancelled_signal = pyqtSignal(dict)    # data: {'model_id': str}
-    model_init_failed_signal = pyqtSignal(dict)       # data: {'model_id': str, 'error': str}
-    show_tg_code_dialog_signal = pyqtSignal(dict)     # data: {'future': future}
-    show_tg_password_dialog_signal = pyqtSignal(dict) # data: {'future': future}
-    reload_prompts_success_signal = pyqtSignal()      # без data
-    reload_prompts_failed_signal = pyqtSignal(dict)   # data: {'error': str}
-    display_loading_popup_signal = pyqtSignal(dict)   # data: {'message': str}
-    hide_loading_popup_signal = pyqtSignal()          # без data
+    history_loaded_signal = pyqtSignal(dict)          
+    more_history_loaded_signal = pyqtSignal(dict)     
+    model_initialized_signal = pyqtSignal(dict)       
+    model_init_cancelled_signal = pyqtSignal(dict)    
+    model_init_failed_signal = pyqtSignal(dict)       
+    show_tg_code_dialog_signal = pyqtSignal(dict)     
+    show_tg_password_dialog_signal = pyqtSignal(dict) 
+    reload_prompts_success_signal = pyqtSignal()      
+    reload_prompts_failed_signal = pyqtSignal(dict)   
+    display_loading_popup_signal = pyqtSignal(dict)   
+    hide_loading_popup_signal = pyqtSignal()          
 
     clear_user_input_signal = pyqtSignal()
     update_chat_font_size_signal = pyqtSignal(int)
@@ -80,10 +166,10 @@ class ChatGUI(QMainWindow):
 
     def __init__(self, settings):
         super().__init__()
-        # Сохраняем только настройки из контроллера
         self.settings = settings
         
-        # Инициализация системы событий
+        self.SETTINGS_PANEL_WIDTH = 400
+        
         self.event_bus = get_event_bus()
         self._connect_signals()
         
@@ -105,6 +191,9 @@ class ChatGUI(QMainWindow):
 
         self.ffmpeg_install_popup = None
 
+        self.current_settings_category = None
+        self.settings_containers = {}
+
         self.update_chat_signal.connect(self._insert_message_slot)
         self.update_status_signal.connect(self.update_status_colors)
         self.update_debug_signal.connect(self.update_debug_info)
@@ -119,6 +208,12 @@ class ChatGUI(QMainWindow):
         self.pulse_error_signal.connect(self._pulse_error_slot)
 
         self.setup_ui()
+        
+        self.settings_animation = QPropertyAnimation(self.settings_overlay, b"maximumWidth")
+        self.settings_animation.setDuration(250)
+        self.settings_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+
+
         self.chat_window.installEventFilter(self)
 
         self.overlay = OverlayWidget(self)
@@ -141,13 +236,11 @@ class ChatGUI(QMainWindow):
 
         self.update_status_colors()
 
-        # Сохраняем значения для локального использования
         self.last_voice_model_selected = None
         self.current_local_voice_id = None
         self.model_loading_cancelled = False
 
     def _connect_signals(self):
-        """Подключение сигналов к слотам (вместо subscribe)"""
         self.history_loaded_signal.connect(self._on_history_loaded)
         self.more_history_loaded_signal.connect(self._on_more_history_loaded)
         self.model_initialized_signal.connect(self._on_model_initialized)
@@ -170,9 +263,7 @@ class ChatGUI(QMainWindow):
         self.finish_model_loading_signal.connect(self._on_finish_model_loading)
         self.cancel_model_loading_signal.connect(self._on_cancel_model_loading)
 
-
     def _check_text_to_talk(self):
-        """Проверка текста для озвучки через события"""
         self.event_bus.emit(Events.CHECK_TEXT_TO_TALK)
 
     def setup_ui(self):
@@ -182,30 +273,206 @@ class ChatGUI(QMainWindow):
         self.setStyleSheet(get_stylesheet())
         
         main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.setup_chat_frame(main_layout)
+        self.setup_settings_panel(main_layout)
         
-        left_widget = QWidget()
-        splitter.addWidget(left_widget)
-        self.setup_left_frame(left_widget)
-        
-        right_widget = QWidget()
-        splitter.addWidget(right_widget)
-        self.setup_right_frame(right_widget)
-        
-        splitter.setSizes([700, 500])
-        
-        main_layout.addWidget(splitter)
+        self._init_settings_containers()
         
         self.resize(1200, 800)
+        
+    def _on_hide_animation_finished(self):
+        self.settings_overlay.hide()
+        try:
+            self.settings_animation.finished.disconnect(self._on_hide_animation_finished)
+        except TypeError:
+            pass
 
-    def setup_left_frame(self, parent):
-        layout = QVBoxLayout(parent)
-        layout.setSpacing(5)
+    def _init_settings_containers(self):
+        callbacks = {
+            "general":     self.setup_common_controls,
+            "language":    language_settings.create_language_section,
+            "api":         api_settings.setup_api_controls,
+            "models":      general_model_settings.setup_general_settings_control,
+            "voice":       voiceover_settings.setup_voiceover_controls,
+            "microphone":  microphone_settings.setup_microphone_controls,
+            "characters":  character_settings.setup_mita_controls,
+            "prompts":     prompt_catalogue_settings.setup_prompt_catalogue_controls,
+            "chat":        chat_settings.setup_chat_settings_controls,
+            "screen":      screen_analysis_settings.setup_screen_analysis_controls,
+            "tokens":      token_settings.setup_token_settings_controls,
+            "commands":    command_replacer_settings.setup_command_replacer_controls,
+            "history":     history_compressor.setup_history_compressor_controls,
+            "gamemaster":  gamemaster_settings.setup_game_master_controls,
+            "debug":       self._debug_wrapper,
+            "news":        self._news_wrapper,
+        }
+
+        for key, fn in callbacks.items():
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+            scroll_area.setObjectName(f"ScrollArea_{key}")
+            
+            # Отключаем горизонтальную полосу прокрутки
+            scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            
+            content_widget = QWidget()
+            content_widget.setObjectName(f"ContentWidget_{key}")
+            
+            content_layout = QVBoxLayout(content_widget)
+            content_layout.setContentsMargins(10, 10, 10, 10)  # Добавляем отступы
+            content_layout.setSpacing(5)
+
+            if isinstance(fn, types.MethodType) and fn.__self__ is self:
+                fn(content_layout)
+            else:
+                fn(self, content_layout)
+            
+            content_layout.addStretch()
+            
+            scroll_area.setWidget(content_widget)
+
+            self.settings_containers[key] = scroll_area
+            self.settings_overlay.add_container(scroll_area)
+
+    def show_settings_category(self, category):
+        self.settings_animation.stop()
+
+        is_hiding = (self.current_settings_category == category and self.settings_overlay.width() > 0)
         
-        button_layout = QHBoxLayout()
+        # Обновляем активное состояние кнопок
+        for cat, btn in self.settings_buttons.items():
+            btn.set_active(cat == category and not is_hiding)
         
+        if is_hiding:
+            self.current_settings_category = None
+            self.settings_animation.setEndValue(0)
+            
+            try:
+                self.settings_animation.finished.disconnect(self._on_hide_animation_finished)
+            except TypeError:
+                pass
+            self.settings_animation.finished.connect(self._on_hide_animation_finished)
+
+        else:
+            self.current_settings_category = category
+            cont = self.settings_containers.get(category)
+            if not cont:
+                return
+
+            self.settings_overlay.show_category(cont)
+            self.settings_animation.setEndValue(self.SETTINGS_PANEL_WIDTH)
+
+        self.settings_animation.setStartValue(self.settings_overlay.width())
+        self.settings_animation.start()
+
+    def _create_debug_section(self, parent, layout):
+        debug_label = QLabel(_('Отладочная информация', 'Debug Information'))
+        debug_label.setObjectName('SeparatorLabel')
+        layout.addWidget(debug_label)
+        
+        self.debug_window = QTextEdit()
+        self.debug_window.setReadOnly(True)
+        self.debug_window.setObjectName("DebugWindow")
+        self.debug_window.setMinimumHeight(200)
+        layout.addWidget(self.debug_window)
+        
+        status_indicators_widget.create_status_indicators(self, layout)
+        
+        self.update_debug_info()
+
+    def _create_news_section(self, parent, layout):
+        news_label = QLabel(self.get_news_content())
+        news_label.setWordWrap(True)
+        news_label.setObjectName('SeparatorLabel')
+        layout.addWidget(news_label)
+
+    def setup_news_control(self, parent):
+        news_label = QLabel(self.get_news_content())
+        news_label.setWordWrap(True)
+        parent.addWidget(news_label)
+
+    def setup_common_controls(self, parent_layout):
+        common_config = [
+            {'label': _('Скрывать (приватные) данные', 'Hide (private) data'), 'key': 'HIDE_PRIVATE',
+            'type': 'checkbutton', 'default_checkbutton': True},
+        ]
+        gui_templates.create_settings_direct(self, parent_layout, common_config)
+
+    def setup_debug_controls(self, parent):
+        self.debug_window = QTextEdit()
+        self.debug_window.setReadOnly(True)
+        self.debug_window.setObjectName("DebugWindow")
+        self.debug_window.setMinimumHeight(200)
+        parent.addWidget(self.debug_window)
+        
+        status_indicators_widget.create_status_indicators(self, parent)
+        
+        self.update_debug_info()
+
+    def setup_settings_panel(self, main_layout):
+        settings_panel = QWidget()
+        settings_panel.setFixedWidth(50)
+        settings_panel.setStyleSheet("""
+            QWidget {
+                background-color: #1e1e1e;
+            }
+        """)
+        
+        panel_layout = QVBoxLayout(settings_panel)
+        panel_layout.setContentsMargins(5, 10, 5, 10)
+        panel_layout.setSpacing(5)
+        
+        self.settings_overlay = SettingsOverlay(self)
+        self.settings_overlay.setMaximumWidth(0)
+        self.settings_overlay.hide()
+        
+        # Сохраняем кнопки для управления активным состоянием
+        self.settings_buttons = {}
+        
+        settings_categories = [
+            ("fa5s.cog", _("Общие", "General"), "general"),
+            ("fa5s.language", _("Язык", "Language"), "language"), 
+            ("fa5s.plug", _("API", "API"), "api"),
+            ("fa5s.robot", _("Модели", "Models"), "models"),
+            ("fa5s.volume-up", _("Озвучка", "Voice"), "voice"),
+            ("fa5s.microphone", _("Микрофон", "Microphone"), "microphone"),
+            ("fa5s.user", _("Персонажи", "Characters"), "characters"),
+            ("fa5s.list", _("Промпты", "Prompts"), "prompts"),
+            ("fa5s.comments", _("Чат", "Chat"), "chat"),
+            ("fa5s.desktop", _("Экран", "Screen"), "screen"),
+            ("fa5s.coins", _("Токены", "Tokens"), "tokens"),
+            ("fa5s.exchange-alt", _("Команды", "Commands"), "commands"),
+            ("fa5s.compress", _("История", "History"), "history"),
+            ("fa5s.gamepad", _("Игра", "Game"), "gamemaster"),
+            ("fa5s.bug", _("Отладка", "Debug"), "debug"),
+            ("fa5s.newspaper", _("Новости", "News"), "news"),
+        ]
+        
+        for icon_name, tooltip, category in settings_categories:
+            btn = SettingsIconButton(icon_name, tooltip)
+            btn.clicked.connect(lambda checked, cat=category, b=btn: self.show_settings_category(cat))
+            panel_layout.addWidget(btn)
+            self.settings_buttons[category] = btn
+        
+        panel_layout.addStretch()
+        
+        main_layout.addWidget(self.settings_overlay)
+        main_layout.addWidget(settings_panel)
+
+    def setup_chat_frame(self, main_layout):
+        chat_widget = QWidget()
+        chat_layout = QVBoxLayout(chat_widget)
+        chat_layout.setContentsMargins(10, 10, 10, 10)
+        chat_layout.setSpacing(5)
+        
+        # Верхняя панель с кнопками и статусами
+        top_panel_layout = QHBoxLayout()
+        
+        # Кнопки слева
         self.clear_chat_button = QPushButton(_("Очистить", "Clear"))
         self.clear_chat_button.clicked.connect(self.clear_chat_display)
         self.clear_chat_button.setMaximumHeight(30)
@@ -214,12 +481,21 @@ class ChatGUI(QMainWindow):
         self.load_history_button.clicked.connect(self.load_chat_history)
         self.load_history_button.setMaximumHeight(30)
         
-        button_layout.addWidget(self.clear_chat_button)
-        button_layout.addWidget(self.load_history_button)
-        button_layout.addStretch()
+        top_panel_layout.addWidget(self.clear_chat_button)
+        top_panel_layout.addWidget(self.load_history_button)
         
-        layout.addLayout(button_layout)
+        # Статус индикаторы правее от кнопок (с небольшим отступом)
+        top_panel_layout.addSpacing(20)  # Отступ между кнопками и индикаторами
         
+        # Создаем статус индикаторы
+        from ui.widgets import status_indicators_widget
+        status_indicators_widget.create_status_indicators_inline(self, top_panel_layout)
+        
+        top_panel_layout.addStretch()  # Растяжка справа
+        
+        chat_layout.addLayout(top_panel_layout)
+        
+        # Остальная часть остается без изменений...
         self.chat_window = QTextBrowser()
         self.chat_window.setOpenExternalLinks(False)
         self.chat_window.setReadOnly(True)
@@ -227,7 +503,7 @@ class ChatGUI(QMainWindow):
         font = QFont("Arial", initial_font_size)
         self.chat_window.setFont(font)
         
-        layout.addWidget(self.chat_window, 1)
+        chat_layout.addWidget(self.chat_window, 1)
 
         self._create_scroll_to_bottom_button()
 
@@ -242,7 +518,6 @@ class ChatGUI(QMainWindow):
         self.token_count_label.setStyleSheet("font-size: 10px;")
         input_layout.addWidget(self.token_count_label)
         
-        # Создаем контейнер для поля ввода с кнопками внутри
         input_container = QWidget()
         input_container.setStyleSheet("""
             QWidget {
@@ -255,17 +530,15 @@ class ChatGUI(QMainWindow):
             }
         """)
         
-        # Используем QGridLayout для более точного позиционирования
         from PyQt6.QtWidgets import QGridLayout
         container_layout = QGridLayout(input_container)
         container_layout.setContentsMargins(5, 5, 5, 5)
         container_layout.setSpacing(5)
         
-        # Поле ввода текста
         self.user_entry = QTextEdit()
-        self.user_entry.setMinimumHeight(24)  # Минимум как у кнопок
-        self.user_entry.setMaximumHeight(80)  # Максимум для расширения
-        self.user_entry.setFixedHeight(36)    # Начальная высота = 1.5 * 24
+        self.user_entry.setMinimumHeight(24)
+        self.user_entry.setMaximumHeight(80)
+        self.user_entry.setFixedHeight(36)
         self.user_entry.installEventFilter(self)
         self.user_entry.setStyleSheet("""
             QTextEdit {
@@ -280,14 +553,11 @@ class ChatGUI(QMainWindow):
             }
         """)
         
-        # Подключаем автоматическое изменение размера
         self.user_entry.textChanged.connect(self._adjust_input_height)
         self.user_entry.textChanged.connect(self._update_send_button_state)
         
-        # Добавляем поле ввода в сетку (занимает всю верхнюю часть)
         container_layout.addWidget(self.user_entry, 0, 0, 1, 2)
         
-        # Контейнер для кнопок внизу слева БЕЗ БОРДЕРА
         button_container = QWidget()
         button_container.setFixedHeight(24)
         button_container.setStyleSheet("""
@@ -298,7 +568,6 @@ class ChatGUI(QMainWindow):
         button_layout_inner.setContentsMargins(0, 0, 0, 0)
         button_layout_inner.setSpacing(4)
         
-        # Кнопка прикрепить - круглая без бордера
         self.attach_button = QPushButton(qta.icon('fa6s.paperclip', color='#b0b0b0', scale_factor=0.7), '')
         self.attach_button.clicked.connect(self.attach_images)
         self.attach_button.setFixedSize(20, 20)
@@ -319,7 +588,6 @@ class ChatGUI(QMainWindow):
             }
         """)
         
-        # Кнопка скриншот - круглая без бордера  
         self.send_screen_button = QPushButton(qta.icon('fa6s.camera', color='#b0b0b0', scale_factor=0.7), '')
         self.send_screen_button.clicked.connect(self.send_screen_capture)
         self.send_screen_button.setFixedSize(20, 20)
@@ -344,10 +612,8 @@ class ChatGUI(QMainWindow):
         button_layout_inner.addWidget(self.send_screen_button)
         button_layout_inner.addStretch()
         
-        # Добавляем кнопки в левый нижний угол
         container_layout.addWidget(button_container, 1, 0)
         
-        # Кнопка отправить в правом нижнем углу с иконкой
         self.send_button = QPushButton(qta.icon('fa6s.paper-plane', color='white', scale_factor=0.8), '')
         self.send_button.clicked.connect(self.send_message)
         self.send_button.setFixedSize(28, 28)
@@ -368,7 +634,6 @@ class ChatGUI(QMainWindow):
             }
         """)
         
-        # Контейнер для кнопки отправки БЕЗ БОРДЕРА
         send_container = QWidget()
         send_container.setStyleSheet("""
             background-color: transparent;
@@ -379,57 +644,70 @@ class ChatGUI(QMainWindow):
         send_layout.addStretch()
         send_layout.addWidget(self.send_button)
         
-        # Добавляем кнопку отправки в правый нижний угол
         container_layout.addWidget(send_container, 1, 1)
         
         input_layout.addWidget(input_container)
 
-        # Скрытые элементы для совместимости (убираем их из UI)
         self.attachment_label = QLabel("")
         self.attachment_label.setVisible(False)
         self.clear_attach_btn = QPushButton("")
         self.clear_attach_btn.setVisible(False)
 
-        layout.addWidget(input_frame)
+        chat_layout.addWidget(input_frame)
 
         self._update_send_button_state()
+        
+        main_layout.addWidget(chat_widget, 1)
+
+    def _debug_wrapper(self, parent_layout):
+        debug_label = QLabel(_('Отладочная информация', 'Debug Information'))
+        debug_label.setObjectName('SeparatorLabel')
+        parent_layout.addWidget(debug_label)
+        
+        self.debug_window = QTextEdit()
+        self.debug_window.setReadOnly(True)
+        self.debug_window.setObjectName("DebugWindow")
+        self.debug_window.setMinimumHeight(200)
+        parent_layout.addWidget(self.debug_window)
+        
+        self.update_debug_info()
+
+    def _news_wrapper(self, parent_layout):
+        self.setup_news_control(parent_layout)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.overlay.resize(self.size())
+        
+        QTimer.singleShot(0, self._position_mita_status)
 
     def _adjust_input_height(self):
-        """Автоматически подстраивает высоту поля ввода под содержимое"""
         doc = self.user_entry.document()
         doc_height = doc.size().height()
         
-        # Добавляем небольшой отступ
         new_height = int(doc_height + 10)
         
-        # Ограничиваем минимальной и максимальной высотой
         new_height = max(36, min(new_height, 80))
         
         self.user_entry.setFixedHeight(new_height)
 
     def _update_send_button_state(self):
-        """Обновляет доступность кнопки отправки в зависимости от наличия контента"""
         has_text = bool(self.user_entry.toPlainText().strip())
         has_images = bool(self.staged_image_data)
         
-        # Проверяем также автоматические изображения если они включены
         has_auto_images = False
         if self._get_setting("ENABLE_SCREEN_ANALYSIS", False):
-            # Проверяем через события есть ли доступные кадры
             frames = self.event_bus.emit_and_wait(Events.CAPTURE_SCREEN, {'limit': 1}, timeout=0.5)
             has_auto_images = bool(frames and frames[0])
             
         if self._get_setting("ENABLE_CAMERA_CAPTURE", False):
-            # Проверяем через события есть ли кадры с камеры
             camera_frames = self.event_bus.emit_and_wait(Events.GET_CAMERA_FRAMES, {'limit': 1}, timeout=0.5)
             has_auto_images = has_auto_images or bool(camera_frames and camera_frames[0])
         
-        # Кнопка активна если есть текст ИЛИ изображения
         is_enabled = has_text or has_images or has_auto_images
         
         self.send_button.setEnabled(is_enabled)
         
-        # Визуально показываем состояние
         if is_enabled:
             self.send_button.setStyleSheet("""
                 QPushButton {
@@ -560,46 +838,6 @@ class ChatGUI(QMainWindow):
 
         return super().eventFilter(obj, event)
 
-    def setup_right_frame(self, parent):
-        layout = QVBoxLayout(parent)
-        layout.setContentsMargins(4, 4, 4, 4)
-        
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
-        settings_widget = QWidget()
-        settings_layout = QVBoxLayout(settings_widget)
-        settings_layout.setSpacing(10)
-        
-        status_indicators_widget.create_status_indicators(self, settings_layout)
-        language_settings.create_language_section(self, settings_layout)
-        api_settings.setup_api_controls(self, settings_layout)
-        general_model_settings.setup_general_settings_control(self, settings_layout)
-        voiceover_settings.setup_voiceover_controls(self, settings_layout)
-        microphone_settings.setup_microphone_controls(self, settings_layout)
-        character_settings.setup_mita_controls(self, settings_layout)
-        prompt_catalogue_settings.setup_prompt_catalogue_controls(self, settings_layout)
-        self.setup_debug_controls(settings_layout)
-        self.setup_common_controls(settings_layout)
-        gamemaster_settings.setup_game_master_controls(self, settings_layout)
-        history_compressor.setup_history_compressor_controls(self, settings_layout)
-        chat_settings.setup_chat_settings_controls(self, settings_layout)
-        screen_analysis_settings.setup_screen_analysis_controls(self, settings_layout)
-        token_settings.setup_token_settings_controls(self, settings_layout)
-        command_replacer_settings.setup_command_replacer_controls(self, settings_layout)
-        self.setup_news_control(settings_layout)
-        
-        settings_layout.addStretch()
-        
-        scroll_area.setWidget(settings_widget)
-        layout.addWidget(scroll_area)
-        
-        for i in range(settings_layout.count()):
-            widget = settings_layout.itemAt(i).widget()
-            if isinstance(widget, CollapsibleSection):
-                widget.collapse()
-
     def _insert_message_slot(self, role, content, insert_at_start, message_time):
         self.insert_message(role, content, insert_at_start, message_time)
 
@@ -724,7 +962,6 @@ class ChatGUI(QMainWindow):
         if role == "user":
             self._insert_formatted_text(cursor, _("Вы: ", "You: "), QColor("gold"), bold=True)
         elif role == "assistant":
-            # Получаем имя персонажа через события
             character_name = self._get_character_name()
             self._insert_formatted_text(cursor, f"{character_name}: ", QColor("hot pink"), bold=True)
 
@@ -819,7 +1056,6 @@ class ChatGUI(QMainWindow):
                                  "UI element for version input not found."))
             return
 
-        # Отправляем событие для планирования обновления
         success = self.event_bus.emit_and_wait(Events.SCHEDULE_G4F_UPDATE, {'version': target_version}, timeout=1.0)
         
         if success and success[0]:
@@ -833,7 +1069,6 @@ class ChatGUI(QMainWindow):
                   "Failed to save settings for the update. Please check the logs."))
 
     def update_status_colors(self):
-        # Получаем статусы через события
         game_connected = self.event_bus.emit_and_wait(Events.GET_CONNECTION_STATUS, timeout=0.5)
         silero_connected = self.event_bus.emit_and_wait(Events.GET_SILERO_STATUS, timeout=0.5)
         mic_active = self.event_bus.emit_and_wait(Events.GET_MIC_STATUS, timeout=0.5)
@@ -858,11 +1093,9 @@ class ChatGUI(QMainWindow):
     def load_chat_history(self):
         self.clear_chat_display()
         
-        # Запрашиваем загрузку истории через события
         self.event_bus.emit(Events.LOAD_HISTORY)
 
     def _on_history_loaded(self, data: dict):
-        """Обработчик загруженной истории"""
         messages = data.get('messages', [])
         
         for entry in messages:
@@ -880,24 +1113,9 @@ class ChatGUI(QMainWindow):
             self.chat_window.verticalScrollBar().maximum()
         )
 
-    def setup_debug_controls(self, parent_layout):
-        section = CollapsibleSection(_("Отладка", "Debug"), parent_layout.widget())
-        
-        self.debug_window = QTextEdit()
-        self.debug_window.setReadOnly(True)
-        self.debug_window.setObjectName("DebugWindow")
-        
-        section.content_layout.addWidget(self.debug_window)
-        parent_layout.addWidget(section)
-        
-        self.update_debug_info()
+    
 
-    def setup_common_controls(self, parent_layout):
-        common_config = [
-            {'label': _('Скрывать (приватные) данные', 'Hide (private) data'), 'key': 'HIDE_PRIVATE',
-             'type': 'checkbutton', 'default_checkbutton': True},
-        ]
-        self.create_settings_section(parent_layout, _("Общие настройки", "Common settings"), common_config)
+    
 
     def validate_number_0_60(self, new_value):
         if not new_value.isdigit():
@@ -970,24 +1188,20 @@ class ChatGUI(QMainWindow):
         if hasattr(self, 'debug_window') and self.debug_window:
             self.debug_window.clear()
             
-            # Получаем debug info через события
             debug_info_result = self.event_bus.emit_and_wait(Events.GET_DEBUG_INFO, timeout=0.5)
             debug_info = debug_info_result[0] if debug_info_result else "Debug info not available"
             
             self.debug_window.insertPlainText(debug_info)
 
-
     def update_token_count(self, event=None):
         show_token_info = self._get_setting("SHOW_TOKEN_INFO", True)
 
         if show_token_info:
-            # Получаем количество токенов через события
             current_context_tokens = self.event_bus.emit_and_wait(Events.GET_CURRENT_CONTEXT_TOKENS, timeout=0.5)
             current_context_tokens = current_context_tokens[0] if current_context_tokens else 0
             
             max_model_tokens = int(self._get_setting("MAX_MODEL_TOKENS", 32000))
             
-            # Получаем стоимость через события
             cost = self.event_bus.emit_and_wait(Events.CALCULATE_COST, timeout=0.5)
             cost = cost[0] if cost else 0.0
 
@@ -1016,9 +1230,8 @@ class ChatGUI(QMainWindow):
     def send_message(self, system_input: str = "", image_data: list[bytes] = None):
         user_input = self.user_entry.toPlainText().strip()
         current_image_data = []
-        staged_image_data = self.staged_image_data.copy()  # Используем локальную копию
+        staged_image_data = self.staged_image_data.copy()
 
-        # Получаем кадры экрана если включен анализ
         if self._get_setting("ENABLE_SCREEN_ANALYSIS", False):
             history_limit = int(self._get_setting("SCREEN_CAPTURE_HISTORY_LIMIT", 1))
             frames = self.event_bus.emit_and_wait(Events.CAPTURE_SCREEN, {'limit': history_limit}, timeout=0.5)
@@ -1029,7 +1242,6 @@ class ChatGUI(QMainWindow):
 
         all_image_data = (image_data or []) + current_image_data + staged_image_data
 
-        # Получаем кадры с камеры если включен захват
         if self._get_setting("ENABLE_CAMERA_CAPTURE", False):
             history_limit = int(self._get_setting("CAMERA_CAPTURE_HISTORY_LIMIT", 1))
             camera_frames = self.event_bus.emit_and_wait(Events.GET_CAMERA_FRAMES, {'limit': history_limit}, timeout=0.5)
@@ -1061,7 +1273,6 @@ class ChatGUI(QMainWindow):
 
             self.insert_message("user", image_content_for_display)
 
-        # Отправляем сообщение через события
         self.event_bus.emit(Events.SEND_MESSAGE, {
             'user_input': user_input,
             'system_input': system_input,
@@ -1069,7 +1280,6 @@ class ChatGUI(QMainWindow):
         })
 
         if staged_image_data:
-            # Очищаем список прикрепленных изображений
             self.event_bus.emit(Events.CLEAR_STAGED_IMAGES)
             self.staged_image_data.clear()
             if self.image_preview_bar:
@@ -1077,11 +1287,9 @@ class ChatGUI(QMainWindow):
                 self._hide_image_preview_bar()
 
     def load_more_history(self):
-        # Запрашиваем загрузку дополнительной истории через события
         self.event_bus.emit(Events.LOAD_MORE_HISTORY)
 
     def _on_more_history_loaded(self, data: dict):
-        """Обработчик загруженной дополнительной истории"""
         messages_to_prepend = data.get('messages', [])
         
         if not messages_to_prepend:
@@ -1101,26 +1309,13 @@ class ChatGUI(QMainWindow):
         
         logger.info(f"Загружено еще {len(messages_to_prepend)} сообщений.")
 
-    def create_settings_section(self, parent_layout, title, settings_config, icon_name=None):
-        return gui_templates.create_settings_section(self, parent_layout, title, settings_config, icon_name=icon_name)
-
-    def create_setting_widget(self, parent, label, setting_key='', widget_type='entry',
-                              options=None, default='', default_checkbutton=False, validation=None, tooltip=None,
-                              width=None, height=None, command=None, hide=False):
-        return gui_templates.create_setting_widget(self, parent, label, setting_key, widget_type,
-                                                  options, default, default_checkbutton, validation, tooltip,
-                                                  width, height, command, hide)
-
     def _save_setting(self, key, value):
-        """Сохранение настройки через события"""
         self.event_bus.emit(Events.SAVE_SETTING, {'key': key, 'value': value})
 
     def _get_setting(self, key, default=None):
-        """Получение настройки напрямую из settings"""
         return self.settings.get(key, default)
 
     def _get_character_name(self):
-        """Получение имени персонажа через события"""
         result = self.event_bus.emit_and_wait(Events.GET_CHARACTER_NAME, timeout=0.5)
         return result[0] if result else "Assistant"
 
@@ -1135,14 +1330,7 @@ class ChatGUI(QMainWindow):
             logger.info(f"Ошибка при получении новостей: {e}")
             return _('Ошибка при загрузке новостей', 'Error loading news')
 
-    def setup_news_control(self, parent_layout):
-        news_config = [
-            {'label': self.get_news_content(), 'type': 'text'},
-        ]
-        self.create_settings_section(parent_layout, _("Новости", "News"), news_config)
-
     def closeEvent(self, event):
-        # Отправляем события для остановки всех процессов
         self.event_bus.emit(Events.STOP_SCREEN_CAPTURE)
         self.event_bus.emit(Events.STOP_CAMERA_CAPTURE)
         self.event_bus.emit(Events.DELETE_SOUND_FILES)
@@ -1177,10 +1365,7 @@ class ChatGUI(QMainWindow):
             self.update_local_model_status_indicator()
             return
 
-        # Проверка на необходимость перезапуска для medium+ моделей
         if selected_model_id in ["medium+", "medium+low"]:
-            # Здесь нужна дополнительная проверка через события
-            # Для упрощения пока пропустим эту логику
             pass
 
         self._save_setting("NM_CURRENT_VOICEOVER", selected_model_id)
@@ -1188,13 +1373,11 @@ class ChatGUI(QMainWindow):
 
         self.update_local_model_status_indicator()
         
-        # Проверяем инициализирована ли модель
         is_initialized = self.event_bus.emit_and_wait(Events.CHECK_MODEL_INITIALIZED, {'model_id': selected_model_id}, timeout=0.5)
         
         if not (is_initialized and is_initialized[0]):
             self.show_model_loading_window(selected_model)
         else:
-            # Выбираем модель
             success = self.event_bus.emit_and_wait(Events.SELECT_VOICE_MODEL, {'model_id': selected_model_id}, timeout=1.0)
             
             if success and success[0]:
@@ -1247,7 +1430,6 @@ class ChatGUI(QMainWindow):
         
         self.model_loading_cancelled = False
         
-        # Запускаем инициализацию через события
         def progress_callback(status_type, message):
             if status_type == "status":
                 QTimer.singleShot(0, lambda: self.loading_status_label.setText(message))
@@ -1260,17 +1442,14 @@ class ChatGUI(QMainWindow):
         self.loading_dialog.show()
 
     def _on_model_initialized(self, data: dict):
-        """Обработчик успешной инициализации модели"""
         model_id = data.get('model_id')
         
         if hasattr(self, 'loading_dialog') and self.loading_dialog:
             self.loading_dialog.close()
         
-        # Выбираем модель
         success = self.event_bus.emit_and_wait(Events.SELECT_VOICE_MODEL, {'model_id': model_id}, timeout=1.0)
         
         if success and success[0]:
-            # Находим модель по ID
             for model in LOCAL_VOICE_MODELS:
                 if model["id"] == model_id:
                     self.last_voice_model_selected = model
@@ -1284,12 +1463,10 @@ class ChatGUI(QMainWindow):
             QMessageBox.critical(self, "Ошибка", "Не удалось активировать модель после инициализации")
 
     def _on_model_init_cancelled(self, data: dict):
-        """Обработчик отмены инициализации модели"""
         if hasattr(self, 'loading_dialog') and self.loading_dialog:
             self.loading_dialog.close()
 
     def _on_model_init_failed(self, data: dict):
-        """Обработчик ошибки инициализации модели"""
         model_id = data.get('model_id')
         error = data.get('error', 'Unknown error')
         
@@ -1334,11 +1511,9 @@ class ChatGUI(QMainWindow):
                         break
 
                 if model_to_load:
-                    # Проверяем установлена ли модель
                     is_installed = self.event_bus.emit_and_wait(Events.CHECK_MODEL_INSTALLED, {'model_id': last_model_id}, timeout=0.5)
                     
                     if is_installed and is_installed[0]:
-                        # Проверяем инициализирована ли модель
                         is_initialized = self.event_bus.emit_and_wait(Events.CHECK_MODEL_INITIALIZED, {'model_id': last_model_id}, timeout=0.5)
                         
                         if not (is_initialized and is_initialized[0]):
@@ -1363,7 +1538,6 @@ class ChatGUI(QMainWindow):
             current_model_id_combo = self._get_setting("NM_CURRENT_VOICEOVER", None)
 
             if current_model_id_combo:
-                # Проверяем статус модели через события
                 is_installed = self.event_bus.emit_and_wait(Events.CHECK_MODEL_INSTALLED, {'model_id': current_model_id_combo}, timeout=0.5)
                 if is_installed and is_installed[0]:
                     is_initialized = self.event_bus.emit_and_wait(Events.CHECK_MODEL_INITIALIZED, {'model_id': current_model_id_combo}, timeout=0.5)
@@ -1449,7 +1623,6 @@ class ChatGUI(QMainWindow):
         self.local_voice_combobox.blockSignals(True)
 
         try:
-            # Получаем список установленных моделей
             installed_models_names = []
             for model in LOCAL_VOICE_MODELS:
                 is_installed = self.event_bus.emit_and_wait(Events.CHECK_MODEL_INSTALLED, {'model_id': model["id"]}, timeout=0.5)
@@ -1528,7 +1701,6 @@ class ChatGUI(QMainWindow):
                 installed_models_ids = settings_data.get("installed_models", [])
                 logger.info(f"Сохранены установленные модели (из окна установки): {installed_models_ids}")
 
-                # Обновляем модули через события
                 self.event_bus.emit(Events.REFRESH_VOICE_MODULES)
                 self.update_local_voice_combobox()
 
@@ -1540,12 +1712,10 @@ class ChatGUI(QMainWindow):
                     self.current_local_voice_id = new_model_id
                     self.update_local_voice_combobox()
 
-            # Создаем функции для проверки через события
             def check_installed_func(model_id):
                 result = self.event_bus.emit_and_wait(Events.CHECK_MODEL_INSTALLED, {'model_id': model_id}, timeout=0.5)
                 return result[0] if result else False
 
-            # Создаем заглушку для local_voice объекта
             class LocalVoiceStub:
                 def is_model_installed(self, model_id):
                     return check_installed_func(model_id)
@@ -1559,7 +1729,6 @@ class ChatGUI(QMainWindow):
             dialog_layout = QVBoxLayout(install_dialog)
             dialog_layout.setContentsMargins(0, 0, 0, 0)
             
-            # Создаем Controller с заглушкой
             controller = VoiceModelController(
                 view_parent=install_dialog,
                 config_dir=config_dir,
@@ -1634,7 +1803,6 @@ class ChatGUI(QMainWindow):
 
         self._save_setting("VOICE_LANGUAGE", selected_language)
 
-        # Изменяем язык через события
         success = self.event_bus.emit_and_wait(Events.CHANGE_VOICE_LANGUAGE, {'language': selected_language}, timeout=1.0)
         
         if success and success[0]:
@@ -1673,9 +1841,7 @@ class ChatGUI(QMainWindow):
             self._insert_formatted_text(cursor, f"{MitaName}: ", QColor("hot pink"), bold=True)
             cursor.insertText(f"{response}\n\n")
 
-    # region изображения
     def attach_images(self):
-        """Обновленный метод прикрепления изображений"""
         file_paths, t = QFileDialog.getOpenFileNames(
             self,
             _("Выберите изображения", "Select Images"),
@@ -1684,32 +1850,26 @@ class ChatGUI(QMainWindow):
         )
 
         if file_paths:
-            # Сохраняем пути через события
             for file_path in file_paths:
                 self.event_bus.emit(Events.STAGE_IMAGE, {'image_data': file_path})
             
-            # Добавляем превью
             for file_path in file_paths:
                 try:
                     with open(file_path, "rb") as f:
                         img_data = f.read()
                         self.staged_image_data.append(img_data)
                         
-                        # Показываем превью
                         self._show_image_preview_bar()
                         self.image_preview_bar.add_image(img_data)
                 except Exception as e:
                     logger.error(f"Ошибка чтения файла {file_path}: {e}")
             
             logger.info(f"Прикреплены изображения: {file_paths}")
-            # Обновляем состояние кнопки отправки
             self._update_send_button_state()
 
     def send_screen_capture(self):
-        """Обновленный метод отправки скриншота"""
         logger.info("Запрошена отправка скриншота.")
         
-        # Получаем кадры через события
         frames = self.event_bus.emit_and_wait(Events.CAPTURE_SCREEN, {'limit': 1}, timeout=0.5)
         
         if not frames or not frames[0]:
@@ -1718,38 +1878,27 @@ class ChatGUI(QMainWindow):
                                 "Failed to capture the screen. Make sure screen analysis is enabled in settings."))
             return
 
-        # Добавляем в staged для превью
         for frame_data in frames[0]:
             self.staged_image_data.append(frame_data)
             self.event_bus.emit(Events.STAGE_IMAGE, {'image_data': frame_data})
         
-        # Показываем превью
         self._show_image_preview_bar()
         for frame_data in frames[0]:
             self.image_preview_bar.add_image(frame_data)
         
-        # Обновляем состояние кнопки отправки
         self._update_send_button_state()
 
     def _clear_staged_images(self):
-        # Очищаем через события
         self.event_bus.emit(Events.CLEAR_STAGED_IMAGES)
         
-        # Очищаем превью
         self.staged_image_data.clear()
         if self.image_preview_bar:
             self.image_preview_bar.clear()
             self._hide_image_preview_bar()
         
-        # Обновляем состояние кнопки отправки
         self._update_send_button_state()
 
     def _clipboard_image_to_controller(self) -> bool:
-        """
-        Если в буфере обмена есть изображение – передаёт его байты
-        контроллеру и обновляет UI. Возвращает True, если картинка
-        была обработана.
-        """
         cb = QApplication.clipboard()
         if not cb.mimeData().hasImage():
             return False
@@ -1758,44 +1907,34 @@ class ChatGUI(QMainWindow):
         if qimg.isNull():
             return False
 
-        # QImage → bytes (PNG)
         buf = QBuffer()
         buf.open(QIODevice.OpenModeFlag.WriteOnly)
         qimg.save(buf, "PNG")
         img_bytes = buf.data().data()
 
-        # Сохраняем данные для превью
         self.staged_image_data.append(img_bytes)
         
-        # Отправляем данные через события
         self.event_bus.emit(Events.STAGE_IMAGE, {'image_data': img_bytes})
 
-        # Показываем превью
         self._show_image_preview_bar()
         self.image_preview_bar.add_image(img_bytes)
         
-        # Обновляем состояние кнопки отправки
         self._update_send_button_state()
         
         return True
 
     def _init_image_preview(self):
-        """Инициализация системы превью изображений"""
-        self.staged_image_data = []  # Храним данные изображений
+        self.staged_image_data = []
         
     def _show_image_preview_bar(self):
-        """Показать панель превью изображений"""
         if not self.image_preview_bar:
-            # Находим input_frame (основной фрейм с токенами и полем ввода)
             input_frame = None
             
-            # Ищем input_frame через иерархию виджетов
             widget = self.user_entry
             while widget:
                 if isinstance(widget, QFrame) and widget.objectName() != "":
                     break
                 if hasattr(widget, 'layout') and widget.layout():
-                    # Проверяем, есть ли token_count_label среди дочерних виджетов
                     for i in range(widget.layout().count()):
                         item = widget.layout().itemAt(i)
                         if item and item.widget() == self.token_count_label:
@@ -1805,48 +1944,35 @@ class ChatGUI(QMainWindow):
                     break
                 widget = widget.parent()
             
-            # Если не нашли по иерархии, используем прямую ссылку
             if not input_frame:
-                # input_frame - это родитель token_count_label
                 input_frame = self.token_count_label.parent()
             
             if input_frame:
-                # Создаем панель превью
                 self.image_preview_bar = ImagePreviewBar(input_frame)
                 self.image_preview_bar.thumbnail_clicked.connect(self._show_full_image)
                 self.image_preview_bar.remove_requested.connect(self._remove_staged_image)
                 
-                # Вставляем между token_count_label (индекс 0) и input_row_layout (индекс 1)
-                # Поэтому вставляем на позицию 1
                 input_frame.layout().insertWidget(1, self.image_preview_bar)
         
         self.image_preview_bar.show()
 
     def _remove_staged_image(self, index):
-        """Удалить изображение из списка прикрепленных"""
         if 0 <= index < len(self.staged_image_data):
-            # Удаляем из данных
             self.staged_image_data.pop(index)
             
-            # Удаляем превью
             self.image_preview_bar.remove_at(index)
             
-            # Если больше нет изображений, скрываем панель превью
             if len(self.staged_image_data) == 0:
                 self._hide_image_preview_bar()
             
-            # Обновляем состояние кнопки отправки
             self._update_send_button_state()
 
     def _hide_image_preview_bar(self):
-        """Скрыть панель превью"""
         if self.image_preview_bar:
             self.image_preview_bar.hide()
             
     def _show_full_image(self, image_data):
-        """Показать полноразмерное изображение в overlay"""
         try:
-            # Конвертируем данные в QPixmap
             if isinstance(image_data, str) and image_data.startswith("data:image"):
                 base64_data = image_data.split(",")[1]
                 img_bytes = base64.b64decode(base64_data)
@@ -1858,33 +1984,19 @@ class ChatGUI(QMainWindow):
             pixmap = QPixmap()
             pixmap.loadFromData(img_bytes)
             
-            # Создаем виджет просмотра
             viewer = ImageViewerWidget(pixmap)
             viewer.close_requested.connect(self.overlay.hide_animated)
             
-            # Устанавливаем контент и показываем
             self.overlay.set_content(viewer)
             self.overlay.show_animated()
             
         except Exception as e:
             logger.error(f"Ошибка при показе изображения: {e}")
-            
-    def resizeEvent(self, event):
-        """Обработка изменения размера окна"""
-        super().resizeEvent(event)
-        # Подгоняем размер overlay
-        self.overlay.resize(self.size())
-        # Репозиционируем статус Миты
-        QTimer.singleShot(0, self._position_mita_status)
-
-    # endregion
 
     def prompt_for_code(self, code_future):
-        # Отправляем событие для запроса кода
         self.event_bus.emit(Events.REQUEST_TG_CODE, {'future': code_future})
 
     def _on_show_tg_code_dialog(self, data: dict):
-        """Показать диалог ввода кода Telegram"""
         code_future = data.get('future')
         
         dialog = QDialog(self)
@@ -1906,7 +2018,6 @@ class ChatGUI(QMainWindow):
             code = code_entry.text().strip()
             if code:
                 if code_future and not code_future.done():
-                    # Получаем loop через события
                     loop = self.event_bus.emit_and_wait("get_event_loop", timeout=0.5)
                     if loop and loop[0] and loop[0].is_running():
                         loop[0].call_soon_threadsafe(code_future.set_result, code)
@@ -1916,7 +2027,6 @@ class ChatGUI(QMainWindow):
         
         def on_reject():
             if code_future and not code_future.done():
-                # Получаем loop через события
                 loop = self.event_bus.emit_and_wait("get_event_loop", timeout=0.5)
                 if loop and loop[0] and loop[0].is_running():
                     import asyncio
@@ -1931,11 +2041,9 @@ class ChatGUI(QMainWindow):
         dialog.exec()
 
     def prompt_for_password(self, password_future):
-        # Отправляем событие для запроса пароля
         self.event_bus.emit(Events.REQUEST_TG_PASSWORD, {'future': password_future})
 
     def _on_show_tg_password_dialog(self, data: dict):
-        """Показать диалог ввода пароля Telegram"""
         password_future = data.get('future')
         
         dialog = QDialog(self)
@@ -1957,7 +2065,6 @@ class ChatGUI(QMainWindow):
             pwd = password_entry.text().strip()
             if pwd:
                 if password_future and not password_future.done():
-                    # Получаем loop через события
                     loop = self.event_bus.emit_and_wait("get_event_loop", timeout=0.5)
                     if loop and loop[0] and loop[0].is_running():
                         loop[0].call_soon_threadsafe(password_future.set_result, pwd)
@@ -1967,7 +2074,6 @@ class ChatGUI(QMainWindow):
                 
         def on_reject():
             if password_future and not password_future.done():
-                # Получаем loop через события
                 loop = self.event_bus.emit_and_wait("get_event_loop", timeout=0.5)
                 if loop and loop[0] and loop[0].is_running():
                     import asyncio
@@ -1981,17 +2087,13 @@ class ChatGUI(QMainWindow):
         dialog.rejected.connect(on_reject)
         dialog.exec()
 
-    # region митастатус
     def _position_mita_status(self):
-        """Позиционировать статус Миты внизу чата"""
         if not hasattr(self, 'mita_status') or not self.mita_status:
             return
             
-        # Размеры чата
         chat_width = self.chat_window.width()
         chat_height = self.chat_window.height()
         
-        # Размеры статуса
         status_width = min(300, chat_width - 20)
         status_height = 40
         
@@ -2001,48 +2103,36 @@ class ChatGUI(QMainWindow):
         self.mita_status.setGeometry(x, y, status_width, status_height)
 
     def _show_thinking_slot(self, character_name: str):
-        """Слот для показа статуса 'думает'."""
         if hasattr(self, 'mita_status') and self.mita_status:
             logger.info('Показываем статус "Думает" для персонажа: %s', character_name)
             self.mita_status.show_thinking(character_name)
 
     def _show_error_slot(self, error_message: str):
-        """Слот для показа статуса ошибки."""
         if hasattr(self, 'mita_status') and self.mita_status:
             logger.info('Показываем статус ошибки: %s', error_message)
             self.mita_status.show_error(error_message)
 
     def _hide_status_slot(self):
-        """Слот для скрытия виджета статуса."""
         if hasattr(self, 'mita_status') and self.mita_status:
             logger.info('Скрываем статус')
             self.mita_status.hide_animated()
     
     def _pulse_error_slot(self):
-        """Слот для 'пульсации' виджета статуса красным цветом."""
         if hasattr(self, 'mita_status') and self.mita_status:
             self.mita_status.pulse_error_animation()
 
-    #endregion
-
     def _on_stream_start(self):
-        """Вызывается при начале стрима"""
-        # Статус уже должен быть показан, ничего не делаем
         pass
 
     def _on_stream_finish(self):
-        """Вызывается при завершении стрима"""
         print("[DEBUG] Стрим завершен, скрываем статус")
-        # Отправляем событие для скрытия статуса Миты
         self.event_bus.emit(Events.HIDE_MITA_STATUS)
 
     def _on_reload_prompts_success(self):
-        """Обработчик успешной загрузки промптов"""
         QMessageBox.information(self, _("Успешно", "Success"), 
             _("Промпты успешно скачаны и перезагружены.", "Prompts successfully downloaded and reloaded."))
     
     def _on_reload_prompts_failed(self, data: dict):
-        """Обработчик ошибки загрузки промптов"""
         error = data.get('error', 'Unknown error')
         if error == "Event loop not running":
             QMessageBox.critical(self, _("Ошибка", "Error"), 
@@ -2053,11 +2143,9 @@ class ChatGUI(QMainWindow):
                   "Failed to download prompts from GitHub. Check your internet connection."))
     
     def _show_loading_popup(self, message):
-        """Показать диалог загрузки"""
         self.event_bus.emit(Events.SHOW_LOADING_POPUP, {"message": message})
     
     def _on_display_loading_popup(self, data: dict):
-        """Отобразить попап загрузки"""
         message = data.get('message', 'Loading...')
         
         if not hasattr(self, 'loading_popup'):
@@ -2073,11 +2161,9 @@ class ChatGUI(QMainWindow):
         self.loading_popup.show()
     
     def _close_loading_popup(self):
-        """Закрыть диалог загрузки"""
         self.event_bus.emit(Events.CLOSE_LOADING_POPUP)
     
     def _on_hide_loading_popup(self):
-        """Скрыть попап загрузки"""
         if hasattr(self, 'loading_popup') and self.loading_popup:
             self.loading_popup.close()
 
@@ -2107,3 +2193,52 @@ class ChatGUI(QMainWindow):
     def _on_cancel_model_loading(self):
         if hasattr(self, 'cancel_model_loading') and hasattr(self, 'loading_dialog'):
             self.cancel_model_loading(self.loading_dialog)
+
+    # region Следующие функции надо бы перенести в более подходящее место
+
+    def create_settings_section(self, parent_layout, title, settings_config, icon_name=None):
+        """Обёртка для обратной совместимости с модулями настроек"""
+        # Создаём контейнер для заголовка
+        header_widget = QWidget()
+        header_layout = QVBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 10)
+        header_layout.setSpacing(5)
+        
+        # Создаём заголовок
+        title_label = QLabel(title)
+        title_label.setObjectName('SectionTitle')
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title_label.setStyleSheet('''
+            QLabel#SectionTitle {
+                font-size: 14px;
+                font-weight: bold;
+                color: #ffffff;
+                padding: 5px 0;
+            }
+        ''')
+        header_layout.addWidget(title_label)
+        
+        # Создаём разделитель
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet('''
+            QFrame {
+                background-color: #4a4a4a;
+                max-height: 2px;
+                margin: 0 10px;
+            }
+        ''')
+        header_layout.addWidget(separator)
+        
+        parent_layout.addWidget(header_widget)
+        
+        # Создаём настройки
+        gui_templates.create_settings_direct(self, parent_layout, settings_config)
+
+    def create_settings_flat(self, parent_layout, title, settings_config, icon_name=None):
+        """Создаёт настройки без секции (плоско) - для микрофона, озвучки, персонажей и промптов"""
+        # Просто создаём настройки напрямую без заголовка секции
+        gui_templates.create_settings_direct(self, parent_layout, settings_config)
+
+    # endregion
