@@ -1723,7 +1723,7 @@ class ChatGUI(QMainWindow):
         if selected_method is not None:
             self._save_setting("VOICEOVER_METHOD", selected_method)
 
-        use_voice        = bool(self._get_setting("SILERO_USE",  True))
+        use_voice        = bool(self._get_setting("USE_VOICEOVER",  True))
         current_method   =      self._get_setting("VOICEOVER_METHOD", "TG")
 
         if not hasattr(self, "voiceover_section"):
