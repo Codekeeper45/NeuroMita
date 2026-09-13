@@ -243,7 +243,7 @@ class ResponseSegment(BaseModel):
     animations: List[str] = Field(default_factory=list, description="Animations to play once during this segment")
     idle_animations: List[str] = Field(default_factory=list, description="Animations to set as looping idle")
     commands: List[str] = Field(default_factory=list, description="Game commands to execute (supports prefix routing: light:*, music:*, eye:*)")
-    movement_modes: List[str] = Field(default_factory=list, description="Movement mode changes")
+    movement_modes: List[str] = Field(default_factory=list, description="Legacy movement policy. Prefer actor.set_movement_mode from the runtime intent contract when available.")
     visual_effects: List[str] = Field(default_factory=list, description="Visual effects to trigger")
     clothes: List[str] = Field(default_factory=list, description="Clothing/outfit changes")
     music: List[str] = Field(default_factory=list, description="Music changes")
@@ -265,7 +265,7 @@ class ResponseSegment(BaseModel):
         ),
     )
     hint: Optional[str] = Field(default=None, description="Hint text to display")
-    allow_sleep: Optional[bool] = Field(default=None, description="Whether to allow sleep")
+    allow_sleep: Optional[bool] = Field(default=None, description="Whether the PLAYER is allowed to sleep; never starts the character sleeping. Use actor.sleep from the runtime intent contract for the character.")
 
     @model_validator(mode="before")
     @classmethod

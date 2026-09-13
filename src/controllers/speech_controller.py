@@ -869,12 +869,8 @@ class SpeechController(SpeechService):
                     except Exception:
                         pass
 
-                has_alsa = any(d.get("hostapi") == 0 and d.get("max_input_channels", 0) > 0 for d in devices)
-
                 for i, d in enumerate(devices):
                     if d.get('max_input_channels', 0) > 0:
-                        if has_alsa and d.get("hostapi") != 0 and sys.platform.startswith("linux"):
-                            continue
                         name = d.get('name', f"Device {i}")
                         if name == "default" and default_name:
                             name = f"{default_name} [default]"

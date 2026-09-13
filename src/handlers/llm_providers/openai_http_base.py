@@ -334,6 +334,8 @@ class OpenAIHTTPProviderBase(BaseProvider):
                     resp = self._request(request_url, req, payload)
 
             if resp.status_code == 400 and "response_format" in payload:
+                if req.stream:
+                    resp.read()
                 try:
                     err_body = resp.json()
                 except Exception:

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 import numpy as np
 
@@ -11,6 +13,24 @@ from installables.catalog_manifest import CATALOG_ENTRIES
 
 
 class TestNanoGPTASR(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        env_patch = patch.dict('os.environ', {'NANOGPT_API_KEY': '', 'NANO_GPT_API_KEY': ''})
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        from services.asr_settings_service import FileASRSettingsService
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        service = FileASRSettingsService(str(Path(directory.name) / "asr.json"))
+        patcher = patch('services.asr_settings_service.ensure_asr_settings_service', return_value=service)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        key_patch = patch.object(NanoGPTRecognizer, '_resolve_api_key', return_value='test-key')
+        key_patch.start()
+        self.addCleanup(key_patch.stop)
+        runtime_patch = patch.object(SpeechRecognition, 'apply_settings')
+        runtime_patch.start()
+        self.addCleanup(runtime_patch.stop)
+
     def test_registry_registration(self):
         self.assertIn('nanogpt', engine_ids())
         cls = engine_class('nanogpt')
@@ -100,6 +120,7 @@ class TestNanoGPTASR(unittest.IsolatedAsyncioTestCase):
                 "10004": {
                     "id": "10004",
                     "name": "NanoGPT",
+                    "url": "https://nano-gpt.com/api/v1",
                     "key": "sk-nano-preset-found",
                 }
             }

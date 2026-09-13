@@ -186,8 +186,8 @@ RUSSIAN_EMOTION_TO_FISH_TAG = {
 }
 
 TECHNICAL_TAG_REGEX = re.compile(
-    r"\b(?:mita|idle|punch|hands|walk|look|anim|animations|attitude|boredom|stress|love|face_params|custom_fields|target)\b|[+\-:=_{}]|\bhint\s*:",
-    re.I
+    r"^(?:mita\s+|(?:anim|animations|idle_animations|emotions|face_params|custom_fields|target|hint)\s*:|"
+    r"(?:attitude|boredom|stress|love)\s*[+\-:=]\s*[-+]?\d)", re.I
 )
 
 
@@ -202,7 +202,7 @@ def resolve_fish_tag(label: str) -> str:
     Возвращает пустую строку, если тег не относится к известным эмоциям/просодии.
     """
     clean = str(label or "").strip().lower().strip("[]()\"'")
-    if not clean or is_technical_marker(clean):
+    if not clean:
         return ""
     if clean in FISH_AUDIO_TAGS:
         return clean
@@ -229,13 +229,9 @@ def strip_fish_tags(text: str) -> str:
             return ""
         if is_technical_marker(inner) or resolve_fish_tag(inner):
             return ""
-        # Короткие режиссёрские пометки в квадратных скобках (например, [soft voice], [тихий голос], [smiles])
-        if is_square and len(inner) <= 35 and re.match(r"^[a-zA-Zа-яА-ЯёЁ\s_-]+$", inner):
-            return ""
         return raw_bracket
 
     cleaned = re.sub(r"\[([^\[\]\n]+)\]|\(([^()\n]+)\)", _replace_marker, text)
-    cleaned = re.sub(r"[\[\]\{\}]", " ", cleaned)
     cleaned = re.sub(r"\s+([.,!?:;…~»”])", r"\1", cleaned)
     cleaned = re.sub(r'([«“])\s+', r'\1', cleaned)
     cleaned = re.sub(r"[ \t]+", " ", cleaned)
@@ -300,7 +296,7 @@ def clean_fish_audio_text(text: str, model: str = "s2.1-pro") -> str:
     """Очищает текст для Fish Audio, сохраняя валидные теги эмоций и отсекая технический JSON/код."""
     from utils import extract_clean_dialogue_text, process_text_to_voice
     extracted = extract_clean_dialogue_text(text)
-    candidate = extracted or text
+    candidate = extracted
 
     def normalize_marker(match: re.Match) -> str:
         raw_inner = (match.group(1) or match.group(2) or "").strip()
@@ -324,14 +320,6 @@ def clean_fish_audio_text(text: str, model: str = "s2.1-pro") -> str:
 
     cleaned = process_text_to_voice(normalized, allow_fish_tags=True)
     cleaned = re.sub(r"[\{\}]", " ", cleaned)
-    schema_compound_keys = (
-        "segments|idle_animations|face_params|attitude_change|"
-        "boredom_change|stress_change|custom_fields|memory_add|memory_update|"
-        "memory_delete|memory_merge|reminder_add|reminder_delete|start_game|"
-        "end_game|secret_exposed|tool_call|response_protocol_version"
-    )
-    cleaned = re.sub(rf"\b(?:{schema_compound_keys})\b\s*:?", " ", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\b(?:hint|target|clothes|music|text|emotions|animations|commands|movement_modes|visual_effects|interactions)\s*:", " ", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"(?:\s*,\s*)+", ", ", cleaned)
     cleaned = re.sub(r"^\s*,\s*", "", cleaned)
     cleaned = re.sub(r"\s*,\s*$", "", cleaned)

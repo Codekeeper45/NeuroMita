@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Optional, Type, Any, get_args, get_origin
 
 from main_logger import logger
+from pydantic_core import PydanticUndefined
 from schemas.structured_response import (
     RESPONSE_PROTOCOL_VERSION,
     StructuredResponse,
@@ -354,16 +355,28 @@ def _schema_aware_coerce(data: dict, *, model_cls: Type[StructuredResponse]) -> 
             return [str(item) for item in value if item is not None]
         return [str(value)]
 
+    # A hallucinated numeric secret flag must not discard valid action segments
+    # or reveal the secret by truthiness. Treat ambiguous flags as unspecified.
+    flag = data.get("secret_exposed")
+    if flag is not None and not isinstance(flag, bool):
+        if isinstance(flag, str) and flag.strip().lower() in {"true", "false"}:
+            data["secret_exposed"] = flag.strip().lower() == "true"
+        else:
+            data["secret_exposed"] = None
+
     # 0. Починка перепутанных и инвертированных полей модели
-    # 0a. memory_add пришёл как словарь (например {"love_change": 0.5}) -> это custom_fields!
-    if isinstance(data.get("memory_add"), dict):
-        mem_dict = data.pop("memory_add")
-        if not isinstance(data.get("custom_fields"), dict):
-            data["custom_fields"] = {}
-        for k, v in mem_dict.items():
-            if k not in data["custom_fields"]:
-                data["custom_fields"][k] = v
-        data["memory_add"] = []
+    # Preserve misplaced known custom deltas, but never treat arbitrary memory
+    # objects as executable memory operations.
+    custom_names = _extract_custom_field_names(model_cls)
+    for memory_field in ("memory_add", "memory_update"):
+        if isinstance(data.get(memory_field), dict):
+            misplaced = data[memory_field]
+            if not isinstance(data.get("custom_fields"), dict):
+                data["custom_fields"] = {}
+            for key in custom_names:
+                if key in misplaced and key not in data["custom_fields"]:
+                    data["custom_fields"][key] = misplaced[key]
+            data[memory_field] = []
 
     # 0b. image_description содержит список сегментов
     img_desc = data.get("image_description")
@@ -371,13 +384,13 @@ def _schema_aware_coerce(data: dict, *, model_cls: Type[StructuredResponse]) -> 
         has_segment_like = any(isinstance(x, dict) and ("text" in x or "hint" in x) for x in img_desc)
         curr_segs = data.get("segments")
         curr_segs_are_strings = isinstance(curr_segs, list) and all(isinstance(x, str) for x in curr_segs)
-        if not curr_segs or curr_segs_are_strings or has_segment_like:
+        if has_segment_like and (not curr_segs or curr_segs_are_strings):
             if curr_segs_are_strings and curr_segs:
                 # Если в segments были строки памяти ("normal|..."), переносим их в memory_add
                 if all("|" in s for s in curr_segs) and not data.get("memory_add"):
                     data["memory_add"] = curr_segs
             data["segments"] = img_desc
-            data["image_description"] = None
+        data["image_description"] = None
     elif isinstance(img_desc, dict) and ("text" in img_desc or "hint" in img_desc):
         if not data.get("segments"):
             data["segments"] = [img_desc]
@@ -460,7 +473,7 @@ def _schema_aware_coerce(data: dict, *, model_cls: Type[StructuredResponse]) -> 
                     hoisted_fields.append(f"seg0:{found_k}->{field_name}")
             else:
                 default_val = getattr(field_info, "default", None)
-                if default_val is not None and default_val is not ...:
+                if default_val is not None and default_val is not ... and default_val is not PydanticUndefined:
                     custom_fields[field_name] = default_val
                 else:
                     py_type = getattr(field_info, "annotation", None)
@@ -579,7 +592,7 @@ def _schema_aware_coerce(data: dict, *, model_cls: Type[StructuredResponse]) -> 
 
 def _extract_partial_response(raw_text: str, *, model_cls: Type[StructuredResponse]) -> Optional[StructuredResponse]:
     texts = re.findall(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"', raw_text)
-    texts = [t for t in texts if t.strip()]
+    texts = [json.loads('"' + t + '"', strict=False) for t in texts if t.strip()]
     if not texts:
         return None
 

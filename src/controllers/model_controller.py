@@ -2187,6 +2187,14 @@ class ModelController(GenerationService, ModelStateService):
         # Build the result dict with segments
         with perf_span(trace_id, "generation.structured_postprocess", stage="result"):
             result_dict = structured_response_to_result_dict(structured)
+        logger.info(
+            "[StructuredActions][%s] segments=%d intents=%d interactions=%d movement_modes=%d parse=%s coerced=%s",
+            char_id, len(structured.segments),
+            sum(len(seg.intents) for seg in structured.segments),
+            sum(len(seg.interactions) for seg in structured.segments),
+            sum(len(seg.movement_modes) for seg in structured.segments),
+            parse_outcome.parse_level, parse_outcome.schema_coerced,
+        )
         # Remove reasoning from debug display — it's shown as a think block
         result_dict.pop("reasoning", None)
         # Attach raw LLM JSON for the debug panel (not saved to history)

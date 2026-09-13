@@ -117,63 +117,7 @@ class NanoGPTRecognizer(SpeechRecognizerInterface):
         except Exception:
             pass
 
-        from pathlib import Path
-
-        # 1. Читаем из настроек ASR
-        candidates_asr = [
-            Path(os.getcwd()) / "Settings" / "asr_settings.json",
-            Path(__file__).resolve().parents[2] / "Settings" / "asr_settings.json",
-            Path(__file__).resolve().parents[3] / "Settings" / "asr_settings.json",
-        ]
-        try:
-            from core.app_paths import settings_path
-            candidates_asr.insert(0, Path(settings_path("asr_settings.json", create_parent=False)))
-        except Exception:
-            pass
-
-        for candidate in candidates_asr:
-            if candidate and os.path.exists(candidate):
-                try:
-                    with open(candidate, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    k = str(data.get("models", {}).get("nanogpt", {}).get("api_key") or "").strip()
-                    if k:
-                        return k
-                except Exception:
-                    pass
-
-        # 2. Читаем из API пресетов (пресет 10004 или NanoGPT)
-        candidates_api = [
-            Path(os.getcwd()) / "Settings" / "api_presets.json",
-            Path(__file__).resolve().parents[2] / "Settings" / "api_presets.json",
-            Path(__file__).resolve().parents[3] / "Settings" / "api_presets.json",
-        ]
-        try:
-            from core.app_paths import settings_path
-            candidates_api.insert(0, Path(settings_path("api_presets.json", create_parent=False)))
-        except Exception:
-            pass
-
-        for candidate in candidates_api:
-            if candidate and os.path.exists(candidate):
-                try:
-                    with open(candidate, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    presets = data.get("presets", {})
-                    for p in presets.values():
-                        if str(p.get("name", "")).lower() == "nanogpt" or p.get("base") == 10001 or str(p.get("id")) == "10004":
-                            k = str(p.get("key") or "").strip()
-                            if k:
-                                return k
-                except Exception:
-                    pass
-
-        # 3. Переменные окружения
-        env_key = os.environ.get("NANOGPT_API_KEY") or os.environ.get("NANO_GPT_API_KEY")
-        if env_key:
-            return env_key.strip()
-
-        return ""
+        return find_nanogpt_key_in_api_presets()
 
     def requirements(self) -> List[InstallRequirement]:
         return []
@@ -238,27 +182,14 @@ class NanoGPTRecognizer(SpeechRecognizerInterface):
                 self.logger.error(f"NanoGPT ASR: ошибка кодирования WAV: {format_exception(exc)}")
             return None
 
-        endpoint = "https://nano-gpt.com/api/v1/audio/transcriptions"
-        model = self.model or "Whisper-Large-V3"
-
         try:
-            files = {
-                "file": ("audio.wav", wav_bytes, "audio/wav"),
-            }
-            data = {
-                "model": model,
-            }
-            if self.language and self.language != "auto":
-                data["language"] = self.language
-
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-            }
-
-            resp = requests.post(endpoint, headers=headers, files=files, data=data, timeout=25.0)
+            resp = request_nanogpt_transcription(
+                wav_bytes, api_key=api_key, model=self.model,
+                language=self.language, timeout=25.0,
+            )
             if resp.status_code != 200:
                 if self.logger:
-                    self.logger.error(f"NanoGPT ASR HTTP error {resp.status_code}: {resp.text}")
+                    self.logger.error(f"NanoGPT ASR HTTP error {resp.status_code}")
                 return None
 
             result = resp.json()
@@ -286,39 +217,48 @@ class NanoGPTRecognizer(SpeechRecognizerInterface):
             return None
 
 
+def request_nanogpt_transcription(wav_bytes: bytes, *, api_key: str,
+                                  model: str, language: str, timeout: float = 25.0):
+    """One request contract for live recognition and the settings connection test."""
+    data = {"model": model or "Whisper-Large-V3"}
+    if language and language != "auto":
+        data["language"] = language
+    return requests.post(
+        "https://nano-gpt.com/api/v1/audio/transcriptions",
+        headers={"Authorization": f"Bearer {api_key}"},
+        files={"file": ("audio.wav", wav_bytes, "audio/wav")},
+        data=data, timeout=timeout, allow_redirects=False,
+    )
+
+
 def find_nanogpt_key_in_api_presets() -> str:
     """Ищет ключ NanoGPT в сохранённых API пресетах (Settings/api_presets.json)."""
-    from pathlib import Path
-    candidates = [
-        Path(os.getcwd()) / "Settings" / "api_presets.json",
-        Path(__file__).resolve().parents[2] / "Settings" / "api_presets.json",
-        Path(__file__).resolve().parents[3] / "Settings" / "api_presets.json",
-    ]
-    try:
-        from core.app_paths import settings_path
-        candidates.insert(0, Path(settings_path("api_presets.json", create_parent=False)))
-    except Exception:
-        pass
-
-    for path in candidates:
-        if path and os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                presets = data.get("presets", {})
-                for p in presets.values():
-                    name = str(p.get("name", "")).lower()
-                    base = str(p.get("base", ""))
-                    pid = str(p.get("id", ""))
-                    if "nano" in name or base == "10001" or pid == "10004":
-                        key = str(p.get("key") or "").strip()
-                        if key:
-                            return key
-            except Exception:
-                pass
+    from core.app_paths import settings_path
+    from urllib.parse import urlsplit
 
     env_key = os.environ.get("NANOGPT_API_KEY") or os.environ.get("NANO_GPT_API_KEY")
-    return str(env_key or "").strip()
+    if env_key:
+        return env_key.strip()
+    try:
+        with open(settings_path("api_presets.json"), "r", encoding="utf-8") as stream:
+            data = json.load(stream)
+        presets = data.get("presets", {})
+        for preset in presets.values():
+            if not isinstance(preset, dict):
+                continue
+            # A renamed/repurposed template or numeric ID does not identify a
+            # credential's owner. Only reuse keys for the actual NanoGPT host.
+            endpoint = str(preset.get("url") or "")
+            if not endpoint and str(preset.get("base")) == "10001":
+                endpoint = "https://nano-gpt.com/api/v1"
+            if urlsplit(endpoint).hostname != "nano-gpt.com":
+                continue
+            key = str(preset.get("key") or "").strip()
+            if key:
+                return key
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return ""
 
 
 def load_nanogpt_asr_config() -> dict[str, str]:
@@ -352,15 +292,12 @@ def save_nanogpt_asr_config(config: dict[str, str]) -> None:
         "model": str(config.get("model") or "Whisper-Large-V3").strip(),
         "language": str(config.get("language") or "ru").strip(),
     }
-    try:
-        from services.asr_settings_service import ensure_asr_settings_service
-        ensure_asr_settings_service().set_model_settings("nanogpt", clean)
-    except Exception:
-        pass
+    from services.asr_settings_service import ensure_asr_settings_service
+    ensure_asr_settings_service().set_model_settings("nanogpt", clean)
 
     try:
         from handlers.asr_handler import SpeechRecognition
-        SpeechRecognition.set_engine_settings("nanogpt", clean)
+        SpeechRecognition.apply_settings("nanogpt", clean)
     except Exception:
         pass
 
