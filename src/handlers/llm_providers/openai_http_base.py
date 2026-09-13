@@ -318,6 +318,21 @@ class OpenAIHTTPProviderBase(BaseProvider):
                     resp.close()
                     resp = self._request(request_url, req, payload)
 
+            if resp.status_code == 400 and "response_format" in payload:
+                try:
+                    err_body = resp.json()
+                except Exception:
+                    err_body = {}
+                err_msg = str(err_body)
+                if "response_format" in err_msg or "json_schema" in err_msg or "json_object" in err_msg:
+                    logger.warning(
+                        f"[{self.name}] response_format rejected by provider, retrying without response_format. "
+                        f"Error: {err_msg[:200]}"
+                    )
+                    payload.pop("response_format", None)
+                    resp.close()
+                    resp = self._request(request_url, req, payload)
+
         if resp.status_code != 200:
             if req.stream:
                 resp.read()
