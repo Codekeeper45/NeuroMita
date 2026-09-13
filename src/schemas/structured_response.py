@@ -106,6 +106,66 @@ def _to_gemini_schema(schema: dict) -> dict:
     return convert(copy.deepcopy(schema))
 
 
+def _inline_defs(schema: dict) -> dict:
+    """Recursively inline all $ref references matching #/$defs/ into the schema.
+
+    OpenAI-compatible proxies and translation gateways (e.g. CLI Proxy routing
+    to Google Gemini) often lack a full JSON Schema dereferencer and strip or
+    drop unresolvable $ref keys. When `segments.items` has only `{"$ref": "#/$defs/ResponseSegment"}`,
+    the gateway produces `items: {}`, causing constrained decoding to emit
+    empty segment objects `[{}]` without `text`.
+
+    Inlining definitions directly into the schema ensures cross-provider compatibility
+    while preserving standard JSON Schema validity.
+    """
+    import copy
+
+    schema = copy.deepcopy(schema)
+    defs = schema.get("$defs")
+    if not isinstance(defs, dict) or not defs:
+        return schema
+
+    memo: dict[str, dict] = {}
+
+    def resolve_def(name: str, visiting: set[str]) -> dict:
+        if name in memo:
+            return copy.deepcopy(memo[name])
+        if name not in defs or name in visiting:
+            return {}
+        visiting.add(name)
+        resolved = resolve_node(copy.deepcopy(defs[name]), visiting)
+        visiting.remove(name)
+        memo[name] = resolved
+        return copy.deepcopy(resolved)
+
+    def resolve_node(node: Any, visiting: set[str]) -> Any:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                ref = str(node["$ref"])
+                if ref.startswith("#/$defs/"):
+                    def_name = ref[len("#/$defs/"):]
+                    resolved = resolve_def(def_name, visiting)
+                    if isinstance(resolved, dict) and resolved:
+                        out = copy.deepcopy(resolved)
+                        for k, v in node.items():
+                            if k != "$ref":
+                                out[k] = resolve_node(v, visiting)
+                        return out
+            return {k: resolve_node(v, visiting) for k, v in node.items()}
+        elif isinstance(node, list):
+            return [resolve_node(item, visiting) for item in node]
+        return node
+
+    resolved_defs = {k: resolve_def(k, set()) for k in defs}
+    schema["$defs"] = resolved_defs
+
+    for key, value in list(schema.items()):
+        if key != "$defs":
+            schema[key] = resolve_node(value, set())
+
+    return schema
+
+
 def _remove_schema_properties(schema: dict, field_names: set[str]) -> None:
     properties = schema.get("properties")
     if not isinstance(properties, dict):
@@ -480,6 +540,7 @@ class StructuredResponse(BaseModel):
         _require_segments(schema)
         if require_fields:
             _require_fields(schema, require_fields)
+        schema = _inline_defs(schema)
         return {
             "type": "json_schema",
             "json_schema": {
