@@ -12,7 +12,8 @@ from controllers.prompt_controller import PromptController
 from handlers.fish_audio_handler import clean_fish_audio_text, resolve_fish_tag
 from handlers.llm_providers.base import LLMRequest
 from handlers.llm_providers.common_provider import CommonProvider
-from schemas.structured_response import build_structured_response_model
+from schemas.structured_response import StructuredResponse, build_structured_response_model
+from schemas.game_master_response import GameMasterResponse
 from utils import clean_dialogue_for_subtitles, extract_clean_dialogue_text
 from utils.structured_response_parser import (
     parse_structured_response_with_meta, structured_response_to_result_dict,
@@ -182,4 +183,34 @@ class ActionReviewTests(unittest.TestCase):
         self.assertEqual(response.text, 'OK')
         self.assertEqual(len(requests), 3)
         self.assertNotIn('response_format', requests[-1])
+
+    def test_openai_response_format_inlines_all_defs_for_gemini_cli_proxy(self):
+        # 1. StructuredResponse has inlined segments.items without unresolvable $ref
+        fmt = StructuredResponse.openai_response_format()
+        schema = fmt["json_schema"]["schema"]
+        seg_items = schema["properties"]["segments"]["items"]
+        self.assertNotIn("$ref", seg_items)
+        self.assertIn("text", seg_items["properties"])
+        self.assertIn("emotions", seg_items["properties"])
+        self.assertIn("intents", seg_items["properties"])
+        intents_items = seg_items["properties"]["intents"]["items"]
+        self.assertNotIn("$ref", intents_items)
+        self.assertIn("type", intents_items["properties"])
+        self.assertIn("payload", intents_items["properties"])
+
+        # 2. Custom fields model inlines child properties into anyOf branch
+        cfg = [{"name": "Love", "change_command": "love_change", "type": "float", "required": True}]
+        model = build_structured_response_model(cfg)
+        fmt_custom = model.openai_response_format(custom_params=cfg)
+        cf_schema = fmt_custom["json_schema"]["schema"]["properties"]["custom_fields"]
+        self.assertNotIn("$ref", cf_schema["anyOf"][0])
+        self.assertIn("love_change", cf_schema["anyOf"][0]["properties"])
+
+        # 3. GameMasterResponse inlines actions.items without $ref
+        gm_fmt = GameMasterResponse.openai_response_format()
+        gm_items = gm_fmt["json_schema"]["schema"]["properties"]["actions"]["items"]
+        self.assertNotIn("$ref", gm_items)
+        self.assertIn("type", gm_items["properties"])
+        self.assertIn("target", gm_items["properties"])
+
 
