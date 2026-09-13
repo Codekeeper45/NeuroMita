@@ -150,3 +150,36 @@ class ActionReviewTests(unittest.TestCase):
             service.return_value.set_model_settings.side_effect = OSError('disk full')
             with self.assertRaises(OSError):
                 save_nanogpt_asr_config({'api_key': 'test-key'})
+
+    def test_openai_response_format_custom_fields_schema_validity(self):
+        cfg = [{'name': 'Love', 'change_command': 'love_change', 'type': 'float', 'required': True}]
+        model = build_structured_response_model(cfg)
+        fmt = model.openai_response_format(custom_params=cfg)
+        cf_schema = fmt['json_schema']['schema']['properties']['custom_fields']
+        # Node with anyOf/$ref must not have conflicting outer properties
+        self.assertNotIn('properties', cf_schema)
+        defs = fmt['json_schema']['schema'].get('$defs', {})
+        self.assertTrue(any('love_change' in d.get('properties', {}) for d in defs.values()))
+
+    def test_gemini_proxy_schema_error_triggers_fallback(self):
+        class Body(httpx.SyncByteStream):
+            def __init__(self, data): self.data = data
+            def __iter__(self): yield self.data
+        requests = []
+        def request(_url, req, payload):
+            requests.append(copy.deepcopy(payload))
+            if 'response_format' in payload:
+                err = b'{"error":{"message":"* GenerateContentRequest.generation_config.response_schema.properties[custom_fields].properties: only allowed for OBJECT type"}}'
+                return httpx.Response(400, stream=Body(err))
+            return httpx.Response(200, stream=Body(
+                b'data: {"choices":[{"delta":{"content":"OK"},"finish_reason":null}]}\n\n'
+                b'data: [DONE]\n\n'))
+        provider = CommonProvider()
+        with patch.object(provider, '_request', side_effect=request):
+            response = provider.generate(LLMRequest(model='gemini-3.8-flash-high', messages=[],
+                api_url='http://127.0.0.1:8317/v1', stream=True,
+                capabilities={'structured_output': True}))
+        self.assertEqual(response.text, 'OK')
+        self.assertEqual(len(requests), 3)
+        self.assertNotIn('response_format', requests[-1])
+
