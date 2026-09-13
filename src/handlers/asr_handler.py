@@ -395,6 +395,7 @@ class SpeechRecognition:
                             vad_model = AdaptiveEnergyVAD()
 
                         def speech_probability(audio: np.ndarray, sample_rate: int) -> float:
+                            nonlocal vad_model
                             if isinstance(vad_model, AdaptiveEnergyVAD):
                                 return float(vad_model(audio, sample_rate))
                             try:
@@ -402,7 +403,8 @@ class SpeechRecognition:
                                 tensor = torch.from_numpy(np.asarray(audio, dtype=np.float32))
                                 return float(vad_model(tensor, sample_rate).item())
                             except Exception:
-                                return float(AdaptiveEnergyVAD()(audio, sample_rate))
+                                vad_model = AdaptiveEnergyVAD()
+                                return float(vad_model(audio, sample_rate))
 
                         async def transcribe_segment(audio: np.ndarray, sample_rate: int) -> None:
                             trace = performance_traces().start(

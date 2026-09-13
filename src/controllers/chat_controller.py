@@ -185,7 +185,7 @@ class StructuredJsonStreamFilter:
                     self._escape_next = True
                 elif c == '"':
                     self._state = "SCANNING"
-                    if self._in_bracket and self._tag_buf:
+                    if self._in_bracket:
                         emit(self._current_channel, f"[{self._tag_buf}")
                         self._in_bracket = False
                         self._tag_buf = ""
@@ -222,7 +222,6 @@ class StructuredJsonStreamFilter:
                 if (
                     is_technical_marker(tag)
                     or resolve_fish_tag(tag)
-                    or (len(tag) <= 35 and re.match(r"^[a-zA-Zа-яА-ЯёЁ\s_-]+$", tag))
                 ):
                     self._tag_buf = ""
                     self._skip_space = True
@@ -238,7 +237,7 @@ class StructuredJsonStreamFilter:
 
     def flush_visible(self) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
-        if self._in_bracket and self._tag_buf:
+        if self._in_bracket:
             out.append((self._current_channel, f"[{self._tag_buf}"))
             self._in_bracket = False
             self._tag_buf = ""

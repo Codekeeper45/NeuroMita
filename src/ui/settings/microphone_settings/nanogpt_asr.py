@@ -162,6 +162,7 @@ class NanoGPTAsrSettings(SettingsBodyWidget):
         # 6. Статус и подсказка
         self.status_label = QLabel()
         self.status_label.setWordWrap(True)
+        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.status_label)
 
         hint = QLabel(_(
@@ -232,7 +233,11 @@ class NanoGPTAsrSettings(SettingsBodyWidget):
 
     def _save(self, *_args):
         cfg = self._get_config()
-        save_nanogpt_asr_config(cfg)
+        try:
+            save_nanogpt_asr_config(cfg)
+        except (OSError, ValueError):
+            self.status_label.setText(_("Не удалось сохранить настройки.", "Could not save settings."))
+            return
         self.status_label.setStyleSheet("color: #999999;")
         self.status_label.setText(_("Сохранено", "Saved"))
 
@@ -247,7 +252,11 @@ class NanoGPTAsrSettings(SettingsBodyWidget):
             self.status_label.setText(_("Укажите API-ключ перед проверкой.", "Specify API key before testing."))
             return
 
-        save_nanogpt_asr_config(cfg)
+        try:
+            save_nanogpt_asr_config(cfg)
+        except (OSError, ValueError):
+            self.status_label.setText(_("Не удалось сохранить настройки.", "Could not save settings."))
+            return
 
         model = cfg["model"]
         self.test_btn.setEnabled(False)
@@ -264,12 +273,9 @@ class NanoGPTAsrSettings(SettingsBodyWidget):
                 wf.writeframes(b"\x00\x00" * 16000)  # 1.0s silence
             buf.seek(0)
 
-            res = requests.post(
-                "https://nano-gpt.com/api/transcribe",
-                headers={"x-api-key": key},
-                files={"file": ("test.wav", buf.read(), "audio/wav")},
-                data={"model": model, "language": cfg["language"]},
-                timeout=12,
+            from handlers.asr_models.nanogpt_recognizer import request_nanogpt_transcription
+            res = request_nanogpt_transcription(
+                buf.read(), api_key=key, model=model, language=cfg["language"], timeout=12,
             )
             return res.status_code, res.text
 

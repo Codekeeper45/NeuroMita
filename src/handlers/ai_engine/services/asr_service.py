@@ -164,6 +164,7 @@ class ASRService:
             return bool(self._active)
 
         def _speech_probability(audio: np.ndarray, rate: int) -> float:
+            nonlocal vad_model
             if isinstance(vad_model, AdaptiveEnergyVAD):
                 return float(vad_model(audio, rate))
             try:
@@ -172,7 +173,8 @@ class ASRService:
                 tensor = torch.from_numpy(np.asarray(audio, dtype=np.float32))
                 return float(vad_model(tensor, rate).item())
             except Exception:
-                return float(AdaptiveEnergyVAD()(audio, rate))
+                vad_model = AdaptiveEnergyVAD()
+                return float(vad_model(audio, rate))
 
         async def _transcribe_segment(audio: np.ndarray, rate: int) -> None:
             text = await rec.transcribe(audio, rate)

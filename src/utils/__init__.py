@@ -561,24 +561,6 @@ def extract_clean_dialogue_text(text: str) -> str:
     """Prepare a speech copy; keep the contents of ordinary formatting tags."""
     candidate = extract_dialogue_payload(text)
 
-    # Strip schema keywords and their values (key: [list], key: {obj}, key: "str", key: num)
-    schema_compound_keys = (
-        "segments|idle_animations|face_params|attitude_change|"
-        "boredom_change|stress_change|custom_fields|memory_add|memory_update|"
-        "memory_delete|memory_merge|reminder_add|reminder_delete|start_game|"
-        "end_game|secret_exposed|tool_call|response_protocol_version"
-    )
-    all_schema_keys = (
-        f"{schema_compound_keys}|hint|target|clothes|music|text|"
-        "emotions|animations|commands|movement_modes|visual_effects|interactions"
-    )
-    candidate = re.sub(
-        rf'"?(?:{all_schema_keys})"?\s*:\s*(?:\[[^\]]*\]|\{{[^}}]*\}}|"[^"]*"|[-+]?\d*(?:\.\d+)?|true|false|null|-|\+)?',
-        ' ', candidate, flags=re.IGNORECASE
-    )
-    candidate = re.sub(rf'\b(?:{schema_compound_keys})\b\s*:?', ' ', candidate, flags=re.IGNORECASE)
-    candidate = re.sub(r'\[\s*"[^"]*"(?:\s*,\s*"[^"]*")*\s*\]', ' ', candidate)
-
     # Only known control tags own non-dialogue content. Formatting such as
     # <b>speech</b> must lose its markup, never its words.
     candidate = re.sub(
@@ -618,9 +600,6 @@ def clean_dialogue_for_subtitles(text: str) -> str:
 
     # 1. Извлекаем чистый диалог из JSON/схемы
     candidate = extract_clean_dialogue_text(text)
-    if not candidate:
-        candidate = text
-
     # 2. Вырезаем голосовые теги и технические маркеры
     from handlers.fish_audio_handler import strip_fish_tags
     return strip_fish_tags(candidate)

@@ -105,7 +105,7 @@ API_PROTOCOLS_DATA.append({
     "dialect": Dialects.OPENAI_CHAT_COMPLETIONS, "provider": "common",
     "auth": {"mode": "bearer"}, "headers": {},
     "capabilities": {
-        "tools_native": True,
+        "tools_native": False,
         "streaming": True,
         "streaming_with_tools": False,
         "structured_output": True,
