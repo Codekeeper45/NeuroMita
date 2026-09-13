@@ -451,13 +451,28 @@ class StructuredResponse(BaseModel):
         """
         schema = cls.model_json_schema()
         if custom_params and "properties" in schema and "custom_fields" in schema["properties"]:
-            _type_map = {"float": "number", "double": "number", "int": "integer",
-                         "bool": "boolean", "str": "string", "string": "string"}
-            cf_props = {}
-            for p in custom_params:
-                key = p.get("change_command") or p["name"]
-                cf_props[key] = {"type": _type_map.get(p.get("type", "string"), "string")}
-            schema["properties"]["custom_fields"]["properties"] = cf_props
+            cf_schema = schema["properties"]["custom_fields"]
+            has_defs_ref = False
+            if "$defs" in schema:
+                try:
+                    import json as _json
+                    has_defs_ref = "#/$defs/" in _json.dumps(cf_schema)
+                except Exception:
+                    has_defs_ref = False
+            if not has_defs_ref:
+                _type_map = {"float": "number", "double": "number", "int": "integer",
+                             "bool": "boolean", "str": "string", "string": "string"}
+                cf_props = {}
+                for p in custom_params:
+                    key = p.get("change_command") or p["name"]
+                    cf_props[key] = {"type": _type_map.get(p.get("type", "string"), "string")}
+                if "anyOf" in cf_schema and isinstance(cf_schema["anyOf"], list):
+                    for branch in cf_schema["anyOf"]:
+                        if isinstance(branch, dict) and branch.get("type") == "object":
+                            branch["properties"] = cf_props
+                            break
+                elif cf_schema.get("type") == "object":
+                    cf_schema["properties"] = cf_props
         if exclude_fields:
             _remove_schema_properties(schema, exclude_fields)
         if exclude_segment_fields:
