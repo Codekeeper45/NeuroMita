@@ -147,6 +147,18 @@ NEUROMITA_EMOTION_TO_FISH_TAG = {
     "trytoque": "curious",
     "catchquest": "curious",
     "ajar": "curious",
+    "love": "soft tone",
+    "flirt": "soft tone",
+    "flirty": "soft tone",
+    "blush": "soft tone",
+    "softly": "soft tone",
+    "tender": "soft tone",
+    "gentle": "soft tone",
+    "sob": "sobbing",
+    "giggle": "chuckling",
+    "snicker": "chuckling",
+    "yawn": "yawning",
+    "pant": "panting",
 }
 
 RUSSIAN_EMOTION_TO_FISH_TAG = {
@@ -167,6 +179,10 @@ RUSSIAN_EMOTION_TO_FISH_TAG = {
     "нежно": "soft tone", "мягко": "soft tone", "мягкий тон": "soft tone", "томно": "soft tone",
     "крик": "shouting", "громко": "shouting", "вздох": "sighing", "зевок": "yawning",
     "пауза": "break", "длинная пауза": "long-break",
+    "тихо": "whispering", "тихий голос": "soft tone", "нежный голос": "soft tone",
+    "мягкий": "soft tone", "нежный": "soft tone",
+    "улыбка": "happy", "улыбается": "happy", "с улыбкой": "happy",
+    "смеясь": "laughing", "плачет": "sobbing", "вздыхает": "sighing", "зевает": "yawning",
 }
 
 TECHNICAL_TAG_REGEX = re.compile(
@@ -195,6 +211,35 @@ def resolve_fish_tag(label: str) -> str:
     if clean in RUSSIAN_EMOTION_TO_FISH_TAG:
         return RUSSIAN_EMOTION_TO_FISH_TAG[clean]
     return ""
+
+
+def strip_fish_tags(text: str) -> str:
+    """
+    Удаляет все теги Fish Audio ([tag], (tag)), технические маркеры и режиссёрские ремарки.
+    Сохраняет естественный текст диалога и знаки препинания (тире, кавычки, тильды).
+    """
+    if not text or not isinstance(text, str):
+        return "" if not text else str(text)
+
+    def _replace_marker(match: re.Match) -> str:
+        raw_bracket = match.group(0)
+        is_square = raw_bracket.startswith("[")
+        inner = (match.group(1) or match.group(2) or "").strip()
+        if not inner:
+            return ""
+        if is_technical_marker(inner) or resolve_fish_tag(inner):
+            return ""
+        # Короткие режиссёрские пометки в квадратных скобках (например, [soft voice], [тихий голос], [smiles])
+        if is_square and len(inner) <= 35 and re.match(r"^[a-zA-Zа-яА-ЯёЁ\s_-]+$", inner):
+            return ""
+        return raw_bracket
+
+    cleaned = re.sub(r"\[([^\[\]\n]+)\]|\(([^()\n]+)\)", _replace_marker, text)
+    cleaned = re.sub(r"[\[\]\{\}]", " ", cleaned)
+    cleaned = re.sub(r"\s+([.,!?:;…~»”])", r"\1", cleaned)
+    cleaned = re.sub(r'([«“])\s+', r'\1', cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    return cleaned.strip()
 
 
 def resolve_fish_emotion(emotions: list | str | None) -> str:
