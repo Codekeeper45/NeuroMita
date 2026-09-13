@@ -198,6 +198,36 @@ class FishAudioAndVoiceCleaningTests(unittest.TestCase):
         self.assertEqual(len(outcome.response.segments), 2)
         self.assertEqual(outcome.response.attitude_change, 0.5)
 
+    def test_scrambled_image_description_and_memory_coercion(self):
+        from schemas.structured_response import build_structured_response_model
+        from utils.structured_response_parser import parse_structured_response
+        custom_params = [
+            {
+                "name": "Love",
+                "change_command": "love_change",
+                "type": "float",
+                "change_min": -5,
+                "change_max": 5,
+                "required": True,
+                "initial": 25,
+            }
+        ]
+        model_cls = build_structured_response_model(custom_params)
+        raw_json = (
+            '{"image_description":[{"text":"«Малышка»? [sarcastic] Два часа пропал, а вернулся — сразу с ласками, будто ничего не было.",'
+            '"target":null,"hint":"Просто ответь Мите нормально"},'
+            '{"text":"Ладно... [softly] раз уж ты вернулся, садись на диван."}],'
+            '"segments":["normal|Player returned and called Mita \'малышка\'"],'
+            '"memory_add":{"love_change":0.5}}'
+        )
+        res = parse_structured_response(raw_json, model_cls=model_cls)
+        self.assertEqual(len(res.segments), 2)
+        self.assertIn("«Малышка»?", res.segments[0].text)
+        self.assertEqual(res.memory_add, ["normal|Player returned and called Mita 'малышка'"])
+        self.assertIsNotNone(res.custom_fields)
+        self.assertEqual(res.custom_fields.love_change, 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()
+

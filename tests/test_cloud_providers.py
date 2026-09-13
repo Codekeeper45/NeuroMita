@@ -15,9 +15,15 @@ from presets.api_templates import API_TEMPLATES_DATA
 from presets.api_protocols import API_PROTOCOLS_DATA
 from utils.provider_urls import models_url
 
+try:
+    import pygame
+except ImportError:
+    pygame = None
+
 CONFIG = {"api_key": "test-secret", "voice_id": "a" * 32, "model": "s2.1-pro", "speed": 1.0}
 
 
+@unittest.skipIf(pygame is None, "pygame not installed")
 class FishTests(unittest.IsolatedAsyncioTestCase):
     async def test_muted_local_audio_is_removed_without_failure_status(self):
         from unittest.mock import AsyncMock, Mock
@@ -174,7 +180,8 @@ class ProviderTests(unittest.TestCase):
         tpl = next(t for t in API_TEMPLATES_DATA if t["name"] == "NanoGPT")
         protocol = next(p for p in API_PROTOCOLS_DATA if p["id"] == tpl["protocol_id"])
         self.assertEqual(protocol["provider"], "common")
-        self.assertFalse(protocol["capabilities"]["structured_output"])
+        self.assertTrue(protocol["capabilities"]["structured_output"])
+        self.assertEqual(protocol["capabilities"]["structured_output_mode"], "json_schema")
         self.assertEqual(len({t["id"] for t in API_TEMPLATES_DATA}), len(API_TEMPLATES_DATA))
 
     def test_cliproxyapi_template_and_protocol(self):
@@ -185,7 +192,8 @@ class ProviderTests(unittest.TestCase):
         self.assertIn("claude-4.6-sonnet", tpl["known_models"])
         protocol = next(p for p in API_PROTOCOLS_DATA if p["id"] == tpl["protocol_id"])
         self.assertEqual(protocol["provider"], "common")
-        self.assertFalse(protocol["capabilities"]["structured_output"])
+        self.assertTrue(protocol["capabilities"]["structured_output"])
+        self.assertEqual(protocol["capabilities"]["structured_output_mode"], "json_schema")
 
 
     def test_custom_provider_complete_http_flow(self):
@@ -234,10 +242,16 @@ class ProviderTests(unittest.TestCase):
             thread.join()
 
 
+try:
+    from PyQt6.QtWidgets import QApplication
+except ImportError:
+    QApplication = None
+
+
+@unittest.skipIf(QApplication is None, "PyQt6 not installed")
 class UITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        from PyQt6.QtWidgets import QApplication
         cls.app = QApplication.instance() or QApplication([])
 
     def test_voice_panel_switching_and_persistence(self):
