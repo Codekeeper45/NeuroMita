@@ -626,20 +626,32 @@ def process_text_to_voice(text_to_speak: str, *, allow_fish_tags: bool = False) 
 
     # 2) Обработка тегов Fish Audio vs остальных моделей
     saved_fish_tags: list[tuple[str, str]] = []
-    from handlers.fish_audio_handler import FISH_AUDIO_TAGS
+    from handlers.fish_audio_handler import resolve_fish_tag, is_technical_marker
 
     def _process_fish_tag(match: re.Match) -> str:
-        label = (match.group(1) or match.group(2)).strip().lower()
-        known = label in FISH_AUDIO_TAGS
+        raw_inner = (match.group(1) or match.group(2) or "").strip()
+        if is_technical_marker(raw_inner):
+            return " "
+        resolved = resolve_fish_tag(raw_inner)
         # S2 accepts natural-language cues in square brackets; parentheses
         # are ordinary speech unless they contain a recognized S1 marker.
-        if allow_fish_tags and (match.group(1) is not None or known):
-            tag_id = "".join(chr(ord("a") + int(c)) for c in str(len(saved_fish_tags)))
-            saved_fish_tags.append((tag_id, match.group(0)))
-            return f" __FISHTAG{tag_id}__ "
-        if not allow_fish_tags and known:
-            return ""
-        return match.group(0)
+        if allow_fish_tags:
+            if resolved:
+                tag_id = "".join(chr(ord("a") + int(c)) for c in str(len(saved_fish_tags)))
+                tag_text = f"[{resolved}]" if match.group(1) is not None else f"({resolved})"
+                saved_fish_tags.append((tag_id, tag_text))
+                return f" __FISHTAG{tag_id}__ "
+            if match.group(1) is not None:
+                tag_id = "".join(chr(ord("a") + int(c)) for c in str(len(saved_fish_tags)))
+                saved_fish_tags.append((tag_id, match.group(0)))
+                return f" __FISHTAG{tag_id}__ "
+            return match.group(0)
+        else:
+            # Для других TTS (Silero, Edge-TTS, F5-TTS): полностью убираем теги эмоций
+            if resolved:
+                return " "
+            # Обычные фразы в скобках "(мой друг)" / "[мой друг]" сохраняем как речь
+            return match.group(0)
 
     clean_text = re.sub(r"\[([^\[\]\n]+)\]|\(([^()\n]+)\)", _process_fish_tag, clean_text)
 
@@ -663,10 +675,10 @@ def process_text_to_voice(text_to_speak: str, *, allow_fish_tags: bool = False) 
     ]
     clean_text = "".join(filtered_chars)
 
-    # Восстанавливаем теги Fish Audio, если они были сохранены
+    # Восстанавливаем теги Fish Audio с пробелом после тега
     if allow_fish_tags and saved_fish_tags:
         for tag_id, tag in saved_fish_tags:
-            clean_text = clean_text.replace(f"__FISHTAG{tag_id}__", tag)
+            clean_text = clean_text.replace(f"__FISHTAG{tag_id}__", f"{tag} ")
 
     # 6) Схлопываем пробелы и обрезаем
     clean_text = re.sub(r"\s{2,}", " ", clean_text).strip()
