@@ -227,6 +227,45 @@ class FishAudioAndVoiceCleaningTests(unittest.TestCase):
         self.assertIsNotNone(res.custom_fields)
         self.assertEqual(res.custom_fields.love_change, 0.5)
 
+    def test_fish_audio_emotion_tag_normalization_and_mapping(self):
+        # 1. suspicion maps to doubtful
+        text = "[suspicion] Ты что-то скрываешь?"
+        res = clean_fish_audio_text(text, model="s2.1-pro")
+        self.assertIn("[doubtful]", res)
+        self.assertNotIn("[suspicion]", res)
+        self.assertTrue(res.startswith("[doubtful] "))
+
+        # 2. smileobvi maps to sarcastic, smileteeth maps to excited
+        text2 = "[smileobvi] Ну конечно. [smileteeth] Ура!"
+        res2 = clean_fish_audio_text(text2, model="s2.1-pro")
+        self.assertIn("[sarcastic]", res2)
+        self.assertIn("[excited]", res2)
+
+        # 3. Russian tags map to official Fish Audio tags
+        text3 = "[сарказм] Очень смешно. [шёпот] Слушай меня."
+        res3 = clean_fish_audio_text(text3, model="s2.1-pro")
+        self.assertIn("[sarcastic]", res3)
+        self.assertIn("[whispering]", res3)
+
+        # 4. Animation tags and technical tags are stripped, not voiced
+        text4 = "[doubtful] «Привет» [Mita Oi] [attitude+0.5] Серьёзно?"
+        res4 = clean_fish_audio_text(text4, model="s2.1-pro")
+        self.assertIn("[doubtful]", res4)
+        self.assertNotIn("Mita Oi", res4)
+        self.assertNotIn("attitude", res4)
+        self.assertNotIn("Oi", res4)
+
+        # 5. Local TTS strips both official and mapped emotion tags
+        local_text = "[sarcastic] Ну да. [suspicion] Ты уверен? [Mita Oi] Привет!"
+        local_res = process_text_to_voice(local_text, allow_fish_tags=False)
+        self.assertNotIn("sarcastic", local_res)
+        self.assertNotIn("suspicion", local_res)
+        self.assertNotIn("doubtful", local_res)
+        self.assertNotIn("Mita", local_res)
+        self.assertIn("Ну да", local_res)
+        self.assertIn("Ты уверен", local_res)
+        self.assertIn("Привет", local_res)
+
 
 if __name__ == "__main__":
     unittest.main()

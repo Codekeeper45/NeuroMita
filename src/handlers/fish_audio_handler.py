@@ -125,16 +125,76 @@ NEUROMITA_EMOTION_TO_FISH_TAG = {
     "scared": "scared",
     "worried": "worried",
     "suspicion": "doubtful",
+    "doubt": "doubtful",
+    "doubtful": "doubtful",
+    "sarcasm": "sarcastic",
+    "sarcastic": "sarcastic",
     "sleep": "whispering",
     "halfsleep": "soft tone",
     "calm": "calm",
     "relaxed": "relaxed",
     "whisper": "whispering",
+    "whispering": "whispering",
     "arrogance": "confident",
     "confident": "confident",
     "emptiness": "indifferent",
     "bored": "bored",
+    "curious": "curious",
+    "excited": "excited",
+    "shout": "shouting",
+    "scream": "screaming",
+    "quest": "curious",
+    "trytoque": "curious",
+    "catchquest": "curious",
+    "ajar": "curious",
 }
+
+RUSSIAN_EMOTION_TO_FISH_TAG = {
+    "радость": "happy", "радостно": "happy", "весело": "happy",
+    "смех": "laughing", "смеется": "laughing", "смеётся": "laughing",
+    "хихикает": "chuckling", "усмешка": "chuckling",
+    "сарказм": "sarcastic", "саркастично": "sarcastic", "ирония": "sarcastic", "иронично": "sarcastic",
+    "грусть": "sad", "грустно": "sad", "печально": "sad", "плач": "sobbing",
+    "злость": "angry", "зло": "angry", "сердито": "angry", "гнев": "angry",
+    "спокойно": "calm", "спокойствие": "calm", "уверенно": "confident",
+    "удивление": "surprised", "удивленно": "surprised", "удивлённо": "surprised", "шок": "surprised",
+    "страх": "scared", "испуг": "scared", "испуганно": "scared",
+    "тревога": "worried", "беспокойство": "worried",
+    "сомнение": "doubtful", "сомнительно": "doubtful", "подозрение": "doubtful", "подозрительно": "doubtful",
+    "любопытство": "curious", "любопытно": "curious", "интерес": "curious",
+    "восторг": "excited", "возбужденно": "excited", "возбуждённо": "excited",
+    "шёпот": "whispering", "шепот": "whispering", "шепотом": "whispering", "шёпотом": "whispering",
+    "нежно": "soft tone", "мягко": "soft tone", "мягкий тон": "soft tone", "томно": "soft tone",
+    "крик": "shouting", "громко": "shouting", "вздох": "sighing", "зевок": "yawning",
+    "пауза": "break", "длинная пауза": "long-break",
+}
+
+TECHNICAL_TAG_REGEX = re.compile(
+    r"\b(?:mita|idle|punch|hands|walk|look|anim|animations|attitude|boredom|stress|love|face_params|custom_fields|target)\b|[+\-:=_{}]|\bhint\s*:",
+    re.I
+)
+
+
+def is_technical_marker(clean: str) -> bool:
+    """Проверяет, является ли содержимое скобок технической командой, анимацией или кодом."""
+    return bool(TECHNICAL_TAG_REGEX.search(str(clean or "")))
+
+
+def resolve_fish_tag(label: str) -> str:
+    """
+    Нормализует имя тега (английский, русский или внутренний ID игры) в официальный тег Fish Audio.
+    Возвращает пустую строку, если тег не относится к известным эмоциям/просодии.
+    """
+    clean = str(label or "").strip().lower().strip("[]()\"'")
+    if not clean or is_technical_marker(clean):
+        return ""
+    if clean in FISH_AUDIO_TAGS:
+        return clean
+    if clean in NEUROMITA_EMOTION_TO_FISH_TAG:
+        return NEUROMITA_EMOTION_TO_FISH_TAG[clean]
+    if clean in RUSSIAN_EMOTION_TO_FISH_TAG:
+        return RUSSIAN_EMOTION_TO_FISH_TAG[clean]
+    return ""
 
 
 def resolve_fish_emotion(emotions: list | str | None) -> str:
@@ -145,20 +205,16 @@ def resolve_fish_emotion(emotions: list | str | None) -> str:
     for emo in emotions:
         if not emo or not isinstance(emo, str):
             continue
-        key = emo.strip().lower()
-        if key in NEUROMITA_EMOTION_TO_FISH_TAG:
-            tag = NEUROMITA_EMOTION_TO_FISH_TAG[key]
-            if tag:
-                return tag
-        if key in FISH_AUDIO_TAGS:
-            return key
+        tag = resolve_fish_tag(emo)
+        if tag:
+            return tag
     return ""
 
 
 def format_text_with_fish_emotions(segments: list, model: str = "s2.1-pro") -> str:
     """
     Преобразует сегменты диалога в речь с нативными тегами эмоций Fish Audio:
-    - Для моделей S2 (s2.1-pro, s2-pro, etc.): [tag]
+    - Для моделей S2 (s2.1-pro, s2-pro, s2.1-pro-free, etc.): [tag]
     - Для моделей S1: (tag)
     """
     if not isinstance(segments, list) or not segments:
@@ -180,9 +236,13 @@ def format_text_with_fish_emotions(segments: list, model: str = "s2.1-pro") -> s
         text = extract_clean_dialogue_text(text)
         if not text:
             continue
+        # Срезаем кавычки в начале сегмента, чтобы они не склеивались с тегом эмоции
+        text = re.sub(r'^[«"“\']+\s*', '', text)
+        text = re.sub(r'\s*[»"”\']+$', '', text)
         if emo_tag:
             prefix = f"({emo_tag})" if use_parens else f"[{emo_tag}]"
-            if not text.startswith(prefix) and not text.startswith(f"[{emo_tag}]") and not text.startswith(f"({emo_tag})"):
+            # Если сегмент уже начинается с любого тега эмоции, не дублируем
+            if not re.match(r"^\s*(?:\[[^\]]+\]|\([^)]+\))", text):
                 parts.append(f"{prefix} {text}")
             else:
                 parts.append(text)
@@ -192,20 +252,33 @@ def format_text_with_fish_emotions(segments: list, model: str = "s2.1-pro") -> s
 
 
 def clean_fish_audio_text(text: str, model: str = "s2.1-pro") -> str:
-    """Очищает текст для Fish Audio, сохраняя теги эмоций и отсекая технический JSON/код."""
+    """Очищает текст для Fish Audio, сохраняя валидные теги эмоций и отсекая технический JSON/код."""
     from utils import extract_clean_dialogue_text, process_text_to_voice
     extracted = extract_clean_dialogue_text(text)
-    def normalize_marker(match: re.Match) -> str:
-        label = (match.group(1) or match.group(2)).strip().lower()
-        if label not in FISH_AUDIO_TAGS:
-            return match.group(0)
-        return f"({label})" if model == "s1" else f"[{label}]"
+    candidate = extracted or text
 
+    def normalize_marker(match: re.Match) -> str:
+        raw_inner = (match.group(1) or match.group(2) or "").strip()
+        if is_technical_marker(raw_inner):
+            return " "
+        resolved = resolve_fish_tag(raw_inner)
+        if resolved:
+            return f"({resolved}) " if model == "s1" else f"[{resolved}] "
+        if model == "s1":
+            return match.group(0) if match.group(2) is not None else " "
+        if match.group(1) is not None:
+            return f"[{raw_inner}] "
+        return match.group(0)
+
+    # Нормализуем маркеры эмоций и убираем технические/анимационные теги
     normalized = re.sub(
-        r"\[([^\[\]\n]+)\]|\(([^()\n]+)\)", normalize_marker, extracted or text,
+        r"\[([^\[\]\n]+)\]|\(([^()\n]+)\)", normalize_marker, candidate,
     )
+    # Срезаем кавычки рядом с маркерами, так как кавычки ломают S2 TTS
+    normalized = re.sub(r'["«»“”]', ' ', normalized)
+
     cleaned = process_text_to_voice(normalized, allow_fish_tags=True)
-    cleaned = re.sub(r"[\{\}\"]", " ", cleaned)
+    cleaned = re.sub(r"[\{\}]", " ", cleaned)
     schema_compound_keys = (
         "segments|idle_animations|face_params|attitude_change|"
         "boredom_change|stress_change|custom_fields|memory_add|memory_update|"
@@ -217,6 +290,10 @@ def clean_fish_audio_text(text: str, model: str = "s2.1-pro") -> str:
     cleaned = re.sub(r"(?:\s*,\s*)+", ", ", cleaned)
     cleaned = re.sub(r"^\s*,\s*", "", cleaned)
     cleaned = re.sub(r"\s*,\s*$", "", cleaned)
+    # Гарантируем пробел после закрывающей скобки тега
+    cleaned = re.sub(r'(\[[^\]]+\]|\([^)]+\))\s*', r'\1 ', cleaned)
+    # Убираем дублирующиеся подряд теги
+    cleaned = re.sub(r'(\[[^\]]+\])\s*(?=\1)', '', cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
