@@ -602,6 +602,30 @@ def extract_clean_dialogue_text(text: str) -> str:
     return candidate.strip()
 
 
+def clean_dialogue_for_subtitles(text: str) -> str:
+    """
+    Очищает текст реплики для субтитров Unity и UI игры:
+    - Извлекает чистый текст, если реплика пришла в виде JSON/сегментов.
+    - Удаляет все теги эмоций и просодии Fish Audio ([soft tone], [whispering], [sarcastic], etc.).
+    - Удаляет технические теги, анимации ([Mita Oi], [anim: ...], [attitude+1]).
+    - Удаляет XML/HTML теги разметки (<animations>...</animations>, etc.).
+    - Сохраняет весь естественный текст речи, пунктуацию, тире, кавычки и тильды.
+    """
+    if not text:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+
+    # 1. Извлекаем чистый диалог из JSON/схемы
+    candidate = extract_clean_dialogue_text(text)
+    if not candidate:
+        candidate = text
+
+    # 2. Вырезаем голосовые теги и технические маркеры
+    from handlers.fish_audio_handler import strip_fish_tags
+    return strip_fish_tags(candidate)
+
+
 # ========================== Основная очистка для TTS ==========================
 
 def process_text_to_voice(text_to_speak: str, *, allow_fish_tags: bool = False) -> str:

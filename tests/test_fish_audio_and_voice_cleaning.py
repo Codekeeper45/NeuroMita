@@ -3,8 +3,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import unittest
-from utils import extract_clean_dialogue_text, extract_dialogue_payload, process_text_to_voice
-from handlers.fish_audio_handler import format_text_with_fish_emotions, clean_fish_audio_text
+from utils import (
+    extract_clean_dialogue_text,
+    extract_dialogue_payload,
+    process_text_to_voice,
+    clean_dialogue_for_subtitles,
+)
+from handlers.fish_audio_handler import (
+    format_text_with_fish_emotions,
+    clean_fish_audio_text,
+    strip_fish_tags,
+)
+from controllers.chat_controller import ChatController, StructuredJsonStreamFilter
 
 RAW_USER_JSON = """{
  "segments": [
@@ -265,6 +275,98 @@ class FishAudioAndVoiceCleaningTests(unittest.TestCase):
         self.assertIn("Ну да", local_res)
         self.assertIn("Ты уверен", local_res)
         self.assertIn("Привет", local_res)
+
+    def test_clean_dialogue_for_subtitles_user_reported_case(self):
+        # The user's exact reported screenshot case
+        text = "[soft tone] Ужин, приставка, диван — выбирай..."
+        cleaned = clean_dialogue_for_subtitles(text)
+        self.assertEqual(cleaned, "Ужин, приставка, диван — выбирай...")
+
+    def test_clean_dialogue_for_subtitles_multiple_tags_and_cues(self):
+        text = "[whispering] Подойди ближе... [soft tone] Не бойся, я не кусаюсь~ Ну, если сама не захочу."
+        cleaned = clean_dialogue_for_subtitles(text)
+        self.assertEqual(cleaned, "Подойди ближе... Не бойся, я не кусаюсь~ Ну, если сама не захочу.")
+
+        text2 = "[sarcastic] А манекены тебе понравились? [doubtful] Ты что-то скрываешь?"
+        cleaned2 = clean_dialogue_for_subtitles(text2)
+        self.assertEqual(cleaned2, "А манекены тебе понравились? Ты что-то скрываешь?")
+
+    def test_clean_dialogue_for_subtitles_strips_technical_and_animation_tags(self):
+        text = "[Mita Oi] [anim: Hug] Привет! [attitude+0.5] Рада видеть!"
+        cleaned = clean_dialogue_for_subtitles(text)
+        self.assertEqual(cleaned, "Привет! Рада видеть!")
+
+    def test_clean_dialogue_for_subtitles_preserves_round_parentheses_speech(self):
+        text = "Я заварила чай (зеленый с мятой), будешь?"
+        cleaned = clean_dialogue_for_subtitles(text)
+        self.assertEqual(cleaned, "Я заварила чай (зеленый с мятой), будешь?")
+
+        # But recognized round-parenthesis emotion tags are stripped
+        text2 = "(шёпотом) Секрет..."
+        cleaned2 = clean_dialogue_for_subtitles(text2)
+        self.assertEqual(cleaned2, "Секрет...")
+
+    def test_strip_fish_tags_function(self):
+        raw = "[happy] Привет! [soft tone] Как дела? [Mita Wave] Помаши мне."
+        stripped = strip_fish_tags(raw)
+        self.assertNotIn("[happy]", stripped)
+        self.assertNotIn("[soft tone]", stripped)
+        self.assertNotIn("Mita Wave", stripped)
+        self.assertIn("Привет!", stripped)
+        self.assertIn("Как дела?", stripped)
+        self.assertIn("Помаши мне.", stripped)
+
+    def test_chat_controller_build_task_result_sanitizes_subtitles_and_segments(self):
+        response_text = "[soft tone] Ужин, приставка, диван — выбирай..."
+        structured_data = {
+            "segments": [
+                {
+                    "text": "[soft tone] Ужин, приставка, диван — выбирай...",
+                    "emotions": ["soft tone"],
+                    "animations": ["Mita Idle"],
+                    "target": "Player",
+                }
+            ],
+            "attitude_change": 0.5,
+        }
+        result = ChatController._build_task_result(
+            response_text,
+            structured_data,
+            structured_parse_level="direct",
+            control_plane_trusted=True,
+        )
+
+        # 1. Subtitle response and segment text sent to Unity MUST be clean
+        self.assertEqual(result["response"], "Ужин, приставка, диван — выбирай...")
+        self.assertEqual(len(result["segments"]), 1)
+        self.assertEqual(result["segments"][0]["text"], "Ужин, приставка, диван — выбирай...")
+        self.assertEqual(result["segments"][0]["emotions"], ["soft tone"])
+        self.assertEqual(result["segments"][0]["animations"], ["Mita Idle"])
+        self.assertEqual(result["segments"][0]["target"], "Player")
+
+        # 2. Original structured_data MUST NOT be mutated (needed intact for AudioController TTS!)
+        self.assertEqual(structured_data["segments"][0]["text"], "[soft tone] Ужин, приставка, диван — выбирай...")
+
+    def test_structured_stream_filter_filters_emotion_tags(self):
+        f = StructuredJsonStreamFilter()
+        payload = '{"segments": [{"text": "[soft tone] Ужин, приставка, диван..."}]}'
+        out: list[tuple[str, str]] = []
+        for ch in payload:
+            out.extend(f.feed(ch))
+        out.extend(f.flush_visible())
+        content = "".join(t for c, t in out if c == "content").strip()
+        self.assertNotIn("[soft tone]", content)
+        self.assertIn("Ужин, приставка, диван...", content)
+
+    def test_structured_stream_filter_preserves_non_tag_brackets(self):
+        f = StructuredJsonStreamFilter()
+        payload = '{"segments": [{"text": "Глава [1]: начало"}]}'
+        out: list[tuple[str, str]] = []
+        for ch in payload:
+            out.extend(f.feed(ch))
+        out.extend(f.flush_visible())
+        content = "".join(t for c, t in out if c == "content").strip()
+        self.assertIn("[1]", content)
 
 
 if __name__ == "__main__":
